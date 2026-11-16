@@ -33,14 +33,17 @@ Interactive docs and OpenAPI are disabled on the public deployment.
 Terminate TLS at your reverse proxy; forward WebSocket upgrade headers and strip
 only the configured public prefix before routing to the backend. Preserve the
 path encoding and raw query order. Do not rewrite callback trailing slashes.
-Signature checks construct the URL from configured HTTPS `PUBLIC_BASE_URL` and
-the raw routed path/query, never from caller-controlled Host/forwarded headers.
-HTTP callback validation is exact and unchanged. Only WebSocket validation also
-tries the same handshake path with its final slash toggled, as recommended by
-[Twilio's security guide](https://www.twilio.com/docs/usage/security) for Voice
-WSS validation failures. Scheme, origin, prefix and raw query remain fixed;
-there is no HTTPS/WSS fallback. This compatibility repair does not establish
-which signing scheme a real Twilio handshake uses or prove live interoperability.
+HTTP callback signatures use the exact configured HTTPS `PUBLIC_BASE_URL` plus
+raw routed path/query, never caller-controlled Host/forwarded headers. WebSocket
+signatures use the WSS URL emitted in `<Connect><Stream>`; only the final path
+slash may toggle, following [Twilio's security guide](https://www.twilio.com/docs/usage/security).
+For existing clients, WS validation also accepts HTTPS signatures for that same
+configured endpoint (exact/slash), never arbitrary schemes, origins, ports or
+prefixes; raw query bytes/order stay fixed. All candidates require valid HMAC.
+HTTP callbacks remain HTTPS-only/exact. The earlier HTTPS-only assumption rejected
+valid WSS signatures. Offline TwiML-to-media tests (including a loopback HTTP 101)
+exercise fake providers, not actual carrier signing material or live success;
+a separately authorized live retest is still required.
 Configure proxy request limits (32 KiB for callbacks, 2 MiB for REST), timeouts and rate limits too.
 
 ## Frozen API
@@ -238,6 +241,7 @@ From the repository root, without credentials or live providers:
 cd backend && python3 -B -m unittest discover -s tests -p test_api.py -v
 cd backend && python3 -B -m unittest discover -s tests -p test_stream.py -v
 cd backend && python3 -B -m unittest discover -s tests -p test_stream_diagnostics.py -v
+cd backend && python3 -B -m unittest discover -s tests -p test_stream_signing.py -v
 cd backend && python3 -B -m unittest discover -s tests -p test_adapters.py -v
 cd backend && python3 -B -m unittest discover -s tests -p test_postgres.py -v
 cd backend && python3 -B -m unittest discover -s tests -p test_corrections.py -v

@@ -30,7 +30,9 @@ class Handshake(unittest.TestCase):
     def test_exact_and_documented_slash_signatures(self):
         self.seed()
         for material in ('https://voice.example/prefix/twilio/stream/1?b=%2F&a=1',
-                         'https://voice.example/prefix/twilio/stream/1/?b=%2F&a=1'):
+                         'https://voice.example/prefix/twilio/stream/1/?b=%2F&a=1',
+                         'wss://voice.example/prefix/twilio/stream/1?b=%2F&a=1',
+                         'wss://voice.example/prefix/twilio/stream/1/?b=%2F&a=1'):
             with self.subTest(material=material), patch('app.main.session') as session:
                 async def close(ws, *args): await ws.close(code=1000)
                 session.side_effect = close
@@ -51,8 +53,16 @@ class Handshake(unittest.TestCase):
             sign('https://voice.example/prefix/twilio/stream/2?b=%2F&a=1'),
             sign('https://voice.example/prefix/twilio/stream/1?a=1&b=%2F'),
             sign('https://voice.example/prefix/twilio/stream/1?b=/&a=1'),
-            sign('wss://voice.example/prefix/twilio/stream/1?b=%2F&a=1'),
-            sign('wss://voice.example/prefix/twilio/stream/1/?b=%2F&a=1'),
+            sign('wss://evil.example/prefix/twilio/stream/1?b=%2F&a=1'),
+            sign('wss://voice.example:8443/prefix/twilio/stream/1?b=%2F&a=1'),
+            sign('wss://voice.example/other/twilio/stream/1?b=%2F&a=1'),
+            sign('wss://voice.example/prefix/twilio/stream/2?b=%2F&a=1'),
+            sign('wss://voice.example/prefix/twilio/stream/1?a=1&b=%2F'),
+            sign('wss://voice.example/prefix/twilio/stream/1?b=/&a=1'),
+            sign('ws://voice.example/prefix/twilio/stream/1?b=%2F&a=1'),
+            sign('http://voice.example/prefix/twilio/stream/1?b=%2F&a=1'),
+            sign('ftp://voice.example/prefix/twilio/stream/1?b=%2F&a=1'),
+            sign('wss://voice.example/prefix/twilio/stream/1?b=%2F&a=1', b'wrong'),
             sign('https://voice.example/prefix/twilio/stream/1?b=%2F&a=1', b'wrong')]
         with patch('app.main.time.monotonic', return_value=100), self.assertLogs('app.main', 'WARNING') as logs:
             for signature in materials * 2:

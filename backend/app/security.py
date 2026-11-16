@@ -16,15 +16,19 @@ def signature_valid(token, url, form, signature):
 
 
 def websocket_signature_valid(token, base, path, query, signature):
-    """Configured scheme only; Twilio documents a trailing-slash compatibility retry.
+    """Authenticate the configured WSS endpoint, with same-endpoint HTTPS fallback.
 
-    This is not evidence of the signing scheme used by a real handshake. Only
-    the final path slash varies; origin, configured prefix and raw query do not.
-    HTTP callbacks deliberately continue using signature_valid without retries.
+    TwiML emits WSS from the configured HTTPS base. Only that scheme mapping and
+    the final path slash may vary; origin, port, prefix and raw query stay fixed.
+    HTTP callbacks continue using signature_valid without any compatibility retry.
     """
-    if signature_valid(token, public_url(base, path, query), {}, signature): return True
+    if not base.startswith('https://'): return False
     alternate = path[:-1] if path.endswith('/') else path + '/'
-    return signature_valid(token, public_url(base, alternate, query), {}, signature)
+    for candidate_base in ('wss://' + base[len('https://'):], base):
+        for candidate_path in (path, alternate):
+            if signature_valid(token, public_url(candidate_base, candidate_path, query), {}, signature):
+                return True
+    return False
 
 
 def public_url(base, path, query=b''):
