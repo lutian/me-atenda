@@ -14,6 +14,7 @@ from .observability import Recorder, billed_empty, call_scope
 from .security import public_url, signature_valid, websocket_signature_valid
 from .store import Store
 from .voice import session
+from .openings import prepared_call
 
 
 class Product(BaseModel):
@@ -145,13 +146,19 @@ def create_app(settings=None, store=None, providers=None):
 
     @app.post('/calls', status_code=201, dependencies=[Depends(admin)])
     async def dial(data: Dial):
-        call = await run('reserve', data.lead_id, data.product_id)
-        try: await run('account_call', call['id'], recorder.prices)
-        except Exception:
-            raise HTTPException(503, 'Accounting unavailable; dial not attempted; reservation retained')
-        lead = await run('get', 'leads', data.lead_id)
         try:
-            sid = await provider.dial(call, lead['phone'])
+            call = await prepared_call(db, provider, s, data.lead_id, data.product_id,
+                                       recorder.prices, isinstance(provider, Providers))
+        except LookupError: raise HTTPException(404, 'Not found')
+        except ValueError as exc: raise HTTPException(409, str(exc))
+        except Exception:
+            raise HTTPException(503, 'Speech preparation unavailable; dial not attempted; operator reconciliation required')
+        try: lead = await run('get', 'leads', data.lead_id)
+        except BaseException:
+            await asyncio.shield(asyncio.to_thread(db.abort_undialed, call['id']))
+            raise
+        try:
+            sid = await asyncio.wait_for(provider.dial(call, lead['phone']), timeout=8)
             await run('bind', call['id'], sid)
         except CallCreationRejected as exc:
             await run('finish', call['id'], exc.outcome)

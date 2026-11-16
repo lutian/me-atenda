@@ -106,6 +106,7 @@ class ObservabilityPostgreSQL(fixtures.PostgreSQL):
         self.store.lead({'name':'Existing','phone':'+15551234567','company':''})
         call = self.store.reserve(1,1)
         self.store.append(call['id'], 'user', 'Existing history')
+        self.store.recording(call['id'], 'RE'+'4'*32, b'RIFFexisting')
         self.store.migrate()
         self.store.migrate()
         restarted = TestClient(create_app(self.settings, self.store, self.provider))
@@ -113,6 +114,7 @@ class ObservabilityPostgreSQL(fixtures.PostgreSQL):
         result = restarted.get('/calls/1',headers=self.headers).json()
         self.assertEqual(result['status_final'], 'ligando')
         self.assertEqual(result['transcription_json'], [{'role':'user','content':'Existing history'}])
+        self.assertEqual(restarted.get('/calls/1/audio', headers=self.headers).content, b'RIFFexisting')
         self.assertEqual(self.post('/calls', {'lead_id':1,'product_id':1}).status_code, 409)
         self.assertEqual(restarted.get('/observability/events', headers=self.headers).json(), [])
 

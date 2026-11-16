@@ -3,9 +3,12 @@ import base64
 import hashlib
 import hmac
 import unittest
+import threading
+from types import SimpleNamespace
 from fastapi.testclient import TestClient
 from app.main import create_app
 from app.config import Settings
+from app.voice import NOTICE
 
 
 class MemoryStore:
@@ -17,6 +20,30 @@ class MemoryStore:
         self.turns = []
         self.events = []
         self.snapshots = {}
+        self.openings = {}; self.pins = {}; self.preparing = threading.Lock()
+    def preparation_guard(self):
+        if not self.preparing.acquire(blocking=False): raise ValueError('Speech preparation busy')
+        return SimpleNamespace(close=self.preparing.release)
+    def opening_inputs(self, lead_id, product_id):
+        self.get('leads', lead_id)
+        product = self.get('products', product_id)
+        if any(c['active'] for c in self.calls.values()): raise ValueError('active call')
+        return product
+    def opening_begin(self, digest, text, model, voice, format):
+        if digest in self.openings:
+            row = self.openings[digest]
+            if row['audio'] is None: raise RuntimeError('Unknown preparation')
+            return row['audio']
+        self.openings[digest] = dict(text=text, audio=None)
+    def opening_save(self, digest, audio, ledger):
+        if not 1 <= len(audio) <= 720000: raise ValueError('Invalid audio')
+        self.openings[digest]['audio'] = audio
+    def opening_intro(self, id):
+        row = self.openings[self.pins[id][2]]
+        return row['text'], row['audio']
+    def abort_undialed(self, id):
+        assert self.calls[id]['sid'] is None
+        self.calls[id].update(active=False, status_final='falha_tecnica')
     def event_start(self, event):
         self.events.append(dict(event, id=len(self.events)+1))
         return len(self.events)
@@ -40,13 +67,15 @@ class MemoryStore:
     def delete(self, table, id):
         self.get(table, id)
         del getattr(self, table)[id]
-    def reserve(self, lead_id, product_id):
-        self.get('leads', lead_id); self.get('products', product_id)
+    def reserve(self, lead_id, product_id, opening=None):
+        self.get('leads', lead_id); product = self.get('products', product_id)
+        if opening and opening[0] != product['name']: raise ValueError('Spoken product changed')
         if any(c['active'] for c in self.calls.values()): raise ValueError('active call')
         id = len(self.calls) + 1
         self.calls[id] = dict(id=id, lead_id=lead_id, product_id=product_id,
             status_final='ligando', active=True, sid=None, stream_sid=None,
             duration_seconds=0, recording_status='pending', transcription_json=[], audio=None)
+        if opening: self.pins[id] = opening
         return dict(self.calls[id])
     def audio(self, id): return self.calls[id]['audio']
     def outcome(self, id, status):

@@ -7,8 +7,7 @@ import json
 import re
 from starlette.websockets import WebSocketDisconnect
 
-NOTICE = ('Olá, meu nome é Bia, sou Representante de {product_name}, gostaria de apresentar '
-          'para vocês o nosso produto. É com você que posso falar?')
+from .openings import NOTICE  # Preserve the existing public export.
 MAX_MESSAGE = 8192
 MAX_ULAW = 3200  # 400ms per frame, usual Twilio frame is 160 bytes.
 MAX_PCM = 16000 * 2 * 20
@@ -65,10 +64,10 @@ async def session(ws, id, store, providers):
         if disconnected or draining or done.is_set(): return False
         return (await db('get', 'calls', id))['active']
 
-    async def output(text):
+    async def output(text, audio=None):
         if not await can_speak(): return
         await db('append', id, 'assistant', text)
-        audio = await providers.speak(text)
+        if audio is None: audio = await providers.speak(text)
         if not await can_speak(): return
         for offset in range(0, len(audio), 160):
             if disconnected or draining or done.is_set(): return
@@ -78,8 +77,10 @@ async def session(ws, id, store, providers):
 
     async def conversation():
         nonlocal draining
-        product = await db('get', 'products', bound['product_id'])
-        await output(NOTICE.format(product_name=product['name']))
+        text, audio = await db('opening_intro', id)
+        # Complete the last cached frame with mu-law silence; live replies are unchanged.
+        audio += b'\xff' * (-len(audio) % 160)
+        await output(text, audio)
         while True:
             pcm = await queue.get()
             try:

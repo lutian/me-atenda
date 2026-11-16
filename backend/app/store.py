@@ -4,9 +4,10 @@ import math
 import os
 from pathlib import Path
 from .accounting_store import AccountingStore
+from .opening_store import OpeningStore
 
 
-class Store(AccountingStore):
+class Store(OpeningStore, AccountingStore):
     def __init__(self, url):
         self.url = url.replace('postgresql+psycopg://', 'postgresql://', 1)
 
@@ -102,13 +103,21 @@ class Store(AccountingStore):
                     raise LookupError('not found')
         except ForeignKeyViolation as exc: raise ValueError('record has call history') from exc
 
-    def reserve(self, lead_id, product_id):
+    def reserve(self, lead_id, product_id, opening=None):
         from psycopg.errors import UniqueViolation, ForeignKeyViolation
         try:
             with self.connection() as db:
+                if opening:
+                    product = db.execute('SELECT name FROM products WHERE id=%s FOR UPDATE', (product_id,)).fetchone()
+                    lead = db.execute('SELECT id FROM leads WHERE id=%s FOR UPDATE', (lead_id,)).fetchone()
+                    if not product or not lead: raise LookupError('not found')
+                    if product['name'] != opening[0]: raise ValueError('Spoken product changed; dial not attempted')
                 row = db.execute('INSERT INTO calls(lead_id,product_id) VALUES (%s,%s) RETURNING *',
                                  (lead_id, product_id)).fetchone()
                 db.execute("UPDATE leads SET status='ligando' WHERE id=%s", (lead_id,))
+                if opening:
+                    db.execute('INSERT INTO call_openings(call_id,hello,intro) VALUES (%s,%s,%s)',
+                               (row['id'], opening[1], opening[2]))
                 return row
         except UniqueViolation as exc: raise ValueError('another call is active') from exc
         except ForeignKeyViolation as exc: raise LookupError('lead or product not found') from exc

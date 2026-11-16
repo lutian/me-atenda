@@ -130,8 +130,9 @@ class Signing(unittest.TestCase):
         call = self.client.get('/calls/1', headers=self.headers).json()
         self.assertEqual((call['status_final'], call['duration_seconds']), ('inconclusivo', 12))
         self.assertEqual(call['transcription_json'], [
-            {'role': 'assistant', 'content': spoken[0]}, {'role': 'user', 'content': 'accepted final utterance'}])
-        self.assertEqual((len(spoken), len(transcribed), sales), (1, 1, []))
+            {'role': 'assistant', 'content': fixtures.NOTICE.format(product_name='Produto')},
+            {'role': 'user', 'content': 'accepted final utterance'}])
+        self.assertEqual((spoken, len(transcribed), sales), ([], 1, []))
         self.assertGreater(transcribed[0], 0)
         self.assertEqual(self.provider.stopped, ['CA'+'1'*32])
         self.assertEqual(self.client.get('/observability/events', headers=self.headers).json(), [])

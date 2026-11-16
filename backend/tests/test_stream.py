@@ -73,7 +73,7 @@ class Media(unittest.TestCase):
         call = self.client.get('/calls/1', headers=self.headers).json()
         self.assertEqual(call['product_id'], 2)
         self.assertEqual(call['transcription_json'], [{'role': 'assistant', 'content': expected}])
-        self.assertEqual(spoken, [expected])
+        self.assertEqual(spoken, [])  # Opening was prepared before reservation, never live TTS.
 
     def test_stream_requires_human_gate_and_bound_sid(self):
         self.seed()

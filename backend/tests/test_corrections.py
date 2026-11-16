@@ -24,7 +24,8 @@ class Corrections(unittest.TestCase):
 
     def adapter(self, handler):
         provider = Providers(self.settings)
-        provider.embed = self.provider.embed  # Only embeddings are doubled.
+        provider.embed = self.provider.embed
+        provider.speak = self.provider.speak  # Pre-dial speech remains provider-free.
         provider.client = lambda: httpx.AsyncClient(transport=httpx.MockTransport(handler),
             auth=(self.settings.account_sid, self.settings.twilio_token), follow_redirects=False)
         self.client = TestClient(create_app(self.settings, self.store, provider))
@@ -162,7 +163,7 @@ class Corrections(unittest.TestCase):
                 self.assertEqual(row['duration_seconds'], 12)
                 self.assertEqual(len(transcribed), 3)
                 self.assertEqual(sales, [])
-                self.assertEqual(len(speech), 1)  # Opening notice only.
+                self.assertEqual(speech, [])  # Cached opening; no live synthesis.
                 self.assertEqual(self.client.get('/calls/2', headers=self.headers).json()['status_final'], 'ligando')
                 self.assertEqual(self.post('/calls', {'lead_id': 1, 'product_id': 1}).status_code, 409)
 
