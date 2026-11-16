@@ -141,9 +141,16 @@ class Store(AccountingStore):
                 db.execute('UPDATE calls SET status_final=%s WHERE id=%s', (status, id))
                 db.execute('UPDATE leads SET status=%s WHERE id=%s', (status, row['lead_id']))
 
-    def finish(self, id, status, duration=0):
+    def finish(self, id, status, duration=0, terminal_sid=None):
         with self.connection() as db:
             row = self.locked(db, id)
+            # Only authenticated carrier terminal callbacks supply terminal_sid.
+            # Recheck SID and stream/human state under the same lock as release.
+            if terminal_sid is not None:
+                row = self.bind_locked(db, row, terminal_sid)
+                if row.get('human') and row['stream_sid'] is None:
+                    self.media_failure_locked(db, row)
+                    if row['active'] and row['status_final'] == 'ligando': status = 'falha_tecnica'
             if row['active']:
                 if row['status_final'] != 'ligando': status = row['status_final']
                 row = db.execute('UPDATE calls SET active=FALSE,status_final=%s,duration_seconds=%s '
@@ -154,6 +161,14 @@ class Store(AccountingStore):
                 db.execute('UPDATE calls SET duration_seconds=%s WHERE id=%s', (duration, id))
             self.connectivity_locked(db, dict(row, duration_seconds=max(duration, row['duration_seconds'])))
             return row
+
+    def backfill_media_failure(self, call_id):
+        """Explicit operator-only audit from trusted terminal state, never an outcome repair."""
+        with self.connection() as db:
+            row = self.locked(db, call_id)
+            if row['active'] or not row['sid'] or not row.get('human') or row['stream_sid'] is not None:
+                return False
+            return self.media_failure_locked(db, row)
 
     def human(self, id):
         with self.connection() as db:

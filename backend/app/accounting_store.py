@@ -66,6 +66,21 @@ class AccountingStore:
             return billed
 
     @staticmethod
+    def media_failure_locked(db, row):
+        """One derived diagnostic per call, inside the caller's lifecycle transaction."""
+        event = dict(call_id=row['id'], provider='twilio', operation='media_stream', model=None,
+                     created_at=datetime.now(timezone.utc).isoformat(), elapsed_ms=0, status='error',
+                     error_code='media_stream_not_established',
+                     error_message='Human call ended without an established media stream',
+                     provider_request_id=None, input_tokens=None, output_tokens=None,
+                     cached_input_tokens=None, total_tokens=None, characters=None,
+                     estimated_cost_usd=None, cost_status='not_applicable', pricing_snapshot={})
+        inserted = db.execute('INSERT INTO integration_events(call_id,payload,finalized,stable_key) '
+                              'VALUES (%s,%s::jsonb,TRUE,%s) ON CONFLICT (stable_key) DO NOTHING RETURNING id',
+                              (row['id'], json.dumps(event), 'media_stream:' + str(row['id']))).fetchone()
+        return inserted is not None
+
+    @staticmethod
     def connectivity_locked(db, row):
         """Called only under Store.locked; repeated callbacks replace one stable estimate."""
         account = db.execute('SELECT pricing_snapshot FROM call_accounting WHERE call_id=%s', (row['id'],)).fetchone()

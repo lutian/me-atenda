@@ -60,7 +60,7 @@ class MemoryStore:
         if c['sid'] is None: c['sid'] = sid
         if c['sid'] != sid: raise ValueError('call mismatch')
         return dict(c)
-    def finish(self, id, status, duration=0):
+    def finish(self, id, status, duration=0, terminal_sid=None):
         c = self.calls[id]
         if c['active']:
             if c['status_final'] != 'ligando': status = c['status_final']

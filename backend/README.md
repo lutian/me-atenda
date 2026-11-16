@@ -33,10 +33,15 @@ Interactive docs and OpenAPI are disabled on the public deployment.
 Terminate TLS at your reverse proxy; forward WebSocket upgrade headers and strip
 only the configured public prefix before routing to the backend. Preserve the
 path encoding and raw query order. Do not rewrite callback trailing slashes.
-Twilio signs the **HTTPS** WebSocket upgrade URL, not `wss://`. Signature checks
-construct the exact URL from `PUBLIC_BASE_URL` and the raw routed path/query,
-never from caller-controlled Host/forwarded headers. Configure proxy request
-limits (32 KiB for callbacks, 2 MiB for REST), timeouts and rate limits too.
+Signature checks construct the URL from configured HTTPS `PUBLIC_BASE_URL` and
+the raw routed path/query, never from caller-controlled Host/forwarded headers.
+HTTP callback validation is exact and unchanged. Only WebSocket validation also
+tries the same handshake path with its final slash toggled, as recommended by
+[Twilio's security guide](https://www.twilio.com/docs/usage/security) for Voice
+WSS validation failures. Scheme, origin, prefix and raw query remain fixed;
+there is no HTTPS/WSS fallback. This compatibility repair does not establish
+which signing scheme a real Twilio handshake uses or prove live interoperability.
+Configure proxy request limits (32 KiB for callbacks, 2 MiB for REST), timeouts and rate limits too.
 
 ## Frozen API
 
@@ -146,6 +151,33 @@ retains the reservation for operator reconciliation. Events never store prompts,
 transcripts, phone numbers or token headers. Restrict ledger access/retention as
 operational metadata; do not enable provider HTTP debug/body logging.
 
+### Media establishment diagnostics (S22)
+
+Observabilidade and Histórico display `twilio` / `media_stream` errors with code
+`media_stream_not_established`: an authenticated terminal callback found persisted
+human AMD evidence but no bound stream. The diagnostic and reservation release
+share the existing locked transaction. One stable event per call survives duplicate
+callbacks; an unresolved active `ligando` becomes `falha_tecnica`, while prior
+terminal/commercial outcomes remain unchanged. This event has no invented speech,
+usage or USD charge; connectivity estimates remain separate.
+
+Unsigned/bad WebSocket handshakes never write audit events or mutate call state.
+They emit only static `media_stream_signature_rejected`, throttled to one warning
+per minute per application/process, with no headers, signatures, URLs or PII.
+This cannot attribute an unauthenticated rejection to a particular call.
+
+The original incident evidence was human AMD, no bound stream, no transcript,
+six seconds and an inconclusive outcome, with a pre-accept 403 despite successful
+HTTP callbacks. That locates the failure before speech/inference, not its definitive
+signature cause. An operator may explicitly call `Store.backfill_media_failure(call_id)`
+**after verification/deployment** to add one derived diagnostic from locked stored
+terminal state. It returns true only for a newly inserted event; active, unbound-SID,
+non-human or already-streamed calls return false. It preserves the original outcome,
+lead status, recording and transcript. There is no startup sweep, GET side effect,
+public write endpoint or provider request. No backfill was run by these tests against
+runtime data. A separately authorized live retest is still needed; do not redial as
+part of diagnosis or treat compatibility tests as proof the real call is repaired.
+
 ## Lifecycle, recovery and limits
 
 A partial unique PostgreSQL index serializes active calls across processes.
@@ -205,6 +237,7 @@ From the repository root, without credentials or live providers:
 ```
 cd backend && python3 -B -m unittest discover -s tests -p test_api.py -v
 cd backend && python3 -B -m unittest discover -s tests -p test_stream.py -v
+cd backend && python3 -B -m unittest discover -s tests -p test_stream_diagnostics.py -v
 cd backend && python3 -B -m unittest discover -s tests -p test_adapters.py -v
 cd backend && python3 -B -m unittest discover -s tests -p test_postgres.py -v
 cd backend && python3 -B -m unittest discover -s tests -p test_corrections.py -v
@@ -216,7 +249,9 @@ Use the image's pinned environment for reproducibility. Tests never call Twilio,
 OpenAI or download Whisper models. `test_postgres.py` requires an explicitly
 supplied **disposable** `TEST_DATABASE_URL` and installed psycopg. It creates a
 unique test schema, removes only that schema in teardown, and exercises concurrent
-public API requests against actual PostgreSQL/pgvector. Without that URL it skips:
+public API requests against actual PostgreSQL/pgvector, including concurrent
+terminal media-failure deduplication, reservation release and guarded/idempotent
+explicit backfill preserving legacy history. Without that URL it skips:
 **mocks do not prove PostgreSQL locking**. The migration needs extension privileges
 on first application. `test_observability_postgres.py` additionally checks ledger
 restart persistence/aggregation, an existing001-only schema upgrade and migration

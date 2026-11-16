@@ -1,7 +1,9 @@
 """Frozen admin API and publicly reachable, signed Twilio callbacks."""
 import asyncio
 import hmac
+import logging
 import re
+import time
 from typing import Optional
 from xml.sax.saxutils import escape
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, WebSocket
@@ -9,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from .config import Settings
 from .providers import CallCreationRejected, Providers
 from .observability import Recorder, billed_empty, call_scope
-from .security import public_url, signature_valid
+from .security import public_url, signature_valid, websocket_signature_valid
 from .store import Store
 from .voice import session
 
@@ -230,7 +232,7 @@ def create_app(settings=None, store=None, providers=None):
             try: duration = int(form.get('CallDuration', '0'))
             except ValueError: raise HTTPException(422, 'Invalid duration')
             if not 0 <= duration <= 86400: raise HTTPException(422, 'Invalid duration')
-            await run('finish', id, outcome, duration)
+            await run('finish', id, outcome, duration, form['CallSid'])
         return {'ok': True}
 
     @app.post('/twilio/recording/{id}')
@@ -252,12 +254,24 @@ def create_app(settings=None, store=None, providers=None):
         await run('recording', id, sid, content)
         return {'ok': True}
 
+    # One static warning per minute per app/process, no attacker-controlled labels
+    # or per-call state. Rejected handshakes never touch the database.
+    last_stream_warning = None
+
     @app.websocket('/twilio/stream/{id}')
     async def stream(websocket: WebSocket, id: int):
-        url = public_url(s.public_base, websocket.scope['raw_path'].decode('ascii'),
-                         websocket.scope.get('query_string', b''))
-        # Twilio signs the HTTPS upgrade URL, not a wss:// URL.
-        if not signature_valid(s.twilio_token, url, {}, websocket.headers.get('x-twilio-signature', '')):
+        nonlocal last_stream_warning
+        try:
+            valid = websocket_signature_valid(s.twilio_token, s.public_base,
+                websocket.scope['raw_path'].decode('ascii'), websocket.scope.get('query_string', b''),
+                websocket.headers.get('x-twilio-signature', ''))
+        except (UnicodeError, ValueError):
+            valid = False
+        if not valid:
+            now = time.monotonic()
+            if last_stream_warning is None or now - last_stream_warning >= 60:
+                logging.getLogger(__name__).warning('media_stream_signature_rejected')
+                last_stream_warning = now
             await websocket.close(code=1008)
             return
         await websocket.accept()

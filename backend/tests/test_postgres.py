@@ -66,6 +66,75 @@ class PostgreSQL(unittest.TestCase):
         self.provider.dial = next_dial
         self.assertEqual(dial(0).status_code, 201)
 
+    def test_human_terminal_concurrency_dedup_and_slot_release(self):
+        id = self.post('/calls', {'lead_id': 1, 'product_id': 1}).json()['id']
+        sid = 'CA'+'1'*32
+        self.assertEqual(self.callback(f'/twilio/voice/{id}', {'CallSid': sid, 'AnsweredBy': 'human'}).status_code, 200)
+        payload = {'CallSid': sid, 'CallStatus': 'completed', 'CallDuration': '6'}
+        def terminal(_): return self.callback(f'/twilio/status/{id}', payload)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as workers:
+            self.assertEqual([r.status_code for r in workers.map(terminal, range(8))], [200]*8)
+        row = self.client.get(f'/calls/{id}', headers=self.headers).json()
+        self.assertEqual((row['status_final'], row['duration_seconds'], row['transcription_json']), ('falha_tecnica', 6, []))
+        events = self.client.get(f'/observability/events?call_id={id}', headers=self.headers).json()
+        self.assertEqual(sorted(e['operation'] for e in events), ['connectivity_estimate', 'media_stream'])
+        self.assertEqual(sum(e['error_code'] == 'media_stream_not_established' for e in events), 1)
+        self.assertFalse(self.store.backfill_media_failure(id))
+        async def next_dial(call, phone): return 'CA'+'3'*32
+        self.provider.dial = next_dial
+        self.assertEqual(self.post('/calls', {'lead_id': 1, 'product_id': 1}).status_code, 201)
+
+    def test_media_diagnostic_failure_rolls_back_terminal_release(self):
+        from unittest.mock import patch
+        id = self.post('/calls', {'lead_id': 1, 'product_id': 1}).json()['id']
+        sid = 'CA'+'1'*32
+        self.callback(f'/twilio/voice/{id}', {'CallSid': sid, 'AnsweredBy': 'human'})
+        original = self.store.media_failure_locked
+        def fail_after_insert(db, row):
+            original(db, row)
+            raise RuntimeError('synthetic persistence failure')
+        payload = {'CallSid': sid, 'CallStatus': 'completed', 'CallDuration': '6'}
+        with patch.object(self.store, 'media_failure_locked', side_effect=fail_after_insert):
+            with self.assertRaisesRegex(RuntimeError, 'synthetic persistence failure'):
+                self.callback(f'/twilio/status/{id}', payload)
+        self.assertEqual(self.client.get(f'/calls/{id}', headers=self.headers).json()['status_final'], 'ligando')
+        self.assertEqual(self.client.get(f'/observability/events?call_id={id}', headers=self.headers).json(), [])
+        self.assertEqual(self.post('/calls', {'lead_id': 1, 'product_id': 1}).status_code, 409)
+        self.assertEqual(self.callback(f'/twilio/status/{id}', payload).status_code, 200)
+
+    def test_explicit_backfill_guards_concurrent_dedup_and_preserves_history(self):
+        unbound = self.store.reserve(1, 1)['id']
+        self.store.human(unbound)
+        self.store.finish(unbound, 'inconclusivo', 6)
+        self.assertFalse(self.store.backfill_media_failure(unbound))
+        row = self.store.reserve(1, 1)
+        id = row['id']
+        self.assertFalse(self.store.backfill_media_failure(id))
+        self.store.bind(id, 'CA'+'1'*32)
+        self.store.finish(id, 'inconclusivo', 6)
+        self.assertFalse(self.store.backfill_media_failure(id))  # no persisted human
+        row = self.store.reserve(1, 1)
+        streamed = row['id']
+        self.store.bind(streamed, 'CA'+'3'*32)
+        self.store.human(streamed)
+        self.store.claim_stream(streamed, 'CA'+'3'*32, 'MZ'+'5'*32)
+        self.store.finish(streamed, 'inconclusivo', 6)
+        self.assertFalse(self.store.backfill_media_failure(streamed))
+        row = self.store.reserve(1, 1)
+        legacy = row['id']
+        self.store.bind(legacy, 'CA'+'4'*32)
+        self.store.human(legacy)
+        self.store.finish(legacy, 'inconclusivo', 6)  # legacy outcome, no terminal callback
+        before = self.client.get(f'/calls/{legacy}', headers=self.headers).json()
+        lead_before = self.client.get('/leads', headers=self.headers).json()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as workers:
+            self.assertEqual(sum(workers.map(self.store.backfill_media_failure, [legacy]*8)), 1)
+        self.assertEqual(self.client.get(f'/calls/{legacy}', headers=self.headers).json(), before)
+        self.assertEqual(self.client.get('/leads', headers=self.headers).json(), lead_before)
+        events = self.client.get(f'/observability/events?call_id={legacy}', headers=self.headers).json()
+        self.assertEqual([e['operation'] for e in events], ['media_stream'])
+        self.assertEqual(events[0]['error_code'], 'media_stream_not_established')
+
     def test_recording_retry_and_transcript_survive_restart(self):
         response = self.post('/calls', {'lead_id': 1, 'product_id': 1})
         id = response.json()['id']
