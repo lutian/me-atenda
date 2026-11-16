@@ -54,7 +54,9 @@ class Providers:
             response = await client.post(self.twilio_url('Calls.json'), data={
                 'To': phone, 'From': self.s.twilio_phone,
                 'Url': f'{base}/twilio/voice/{call["id"]}', 'Method': 'POST',
-                'MachineDetection': 'DetectMessageEnd', 'AsyncAmd': 'false',
+                'MachineDetection': 'DetectMessageEnd', 'AsyncAmd': 'true',
+                'AsyncAmdStatusCallback': f'{base}/twilio/amd/{call["id"]}',
+                'AsyncAmdStatusCallbackMethod': 'POST',
                 'StatusCallback': f'{base}/twilio/status/{call["id"]}',
                 'StatusCallbackMethod': 'POST', 'StatusCallbackEvent': 'completed',
                 'Record': 'true', 'RecordingStatusCallback': f'{base}/twilio/recording/{call["id"]}',

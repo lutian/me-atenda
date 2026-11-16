@@ -5,9 +5,10 @@ import os
 from pathlib import Path
 from .accounting_store import AccountingStore
 from .opening_store import OpeningStore
+from .answering_store import AnsweringStore
 
 
-class Store(OpeningStore, AccountingStore):
+class Store(AnsweringStore, OpeningStore, AccountingStore):
     def __init__(self, url):
         self.url = url.replace('postgresql+psycopg://', 'postgresql://', 1)
 
@@ -143,12 +144,15 @@ class Store(OpeningStore, AccountingStore):
     def bind(self, id, sid):
         return self.identify(id, sid)
 
+    @staticmethod
+    def outcome_locked(db, row, status):
+        if row['active'] and row['status_final'] == 'ligando':
+            db.execute('UPDATE calls SET status_final=%s WHERE id=%s', (status, row['id']))
+            db.execute('UPDATE leads SET status=%s WHERE id=%s', (status, row['lead_id']))
+
     def outcome(self, id, status):
         with self.connection() as db:
-            row = self.locked(db, id)
-            if row['active'] and row['status_final'] == 'ligando':
-                db.execute('UPDATE calls SET status_final=%s WHERE id=%s', (status, id))
-                db.execute('UPDATE leads SET status=%s WHERE id=%s', (status, row['lead_id']))
+            self.outcome_locked(db, self.locked(db, id), status)
 
     def finish(self, id, status, duration=0, terminal_sid=None):
         with self.connection() as db:
@@ -179,16 +183,19 @@ class Store(OpeningStore, AccountingStore):
                 return False
             return self.media_failure_locked(db, row)
 
+    @staticmethod
+    def human_locked(db, row):
+        if row['active'] and row['status_final'] == 'ligando':
+            db.execute('UPDATE calls SET human=TRUE WHERE id=%s', (row['id'],))
+
     def human(self, id):
         with self.connection() as db:
-            row = self.locked(db, id)
-            if row['active'] and row['status_final'] == 'ligando':
-                db.execute('UPDATE calls SET human=TRUE WHERE id=%s', (id,))
+            self.human_locked(db, self.locked(db, id))
 
     def claim_stream(self, id, sid, stream):
         with self.connection() as db:
             row = self.locked(db, id)
-            if (not row['active'] or not row['human'] or row['sid'] != sid
+            if (not row['active'] or row['status_final'] != 'ligando' or not row['human'] or row['sid'] != sid
                     or row['stream_sid'] is not None):
                 raise ValueError('stream not authorized or already bound')
             db.execute('UPDATE calls SET stream_sid=%s WHERE id=%s', (stream, id))

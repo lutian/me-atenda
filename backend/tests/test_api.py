@@ -21,6 +21,7 @@ class MemoryStore:
         self.events = []
         self.snapshots = {}
         self.openings = {}; self.pins = {}; self.preparing = threading.Lock()
+        self.answering = {}; self.answer_lock = threading.Lock()
     def preparation_guard(self):
         if not self.preparing.acquire(blocking=False): raise ValueError('Speech preparation busy')
         return SimpleNamespace(close=self.preparing.release)
@@ -41,6 +42,27 @@ class MemoryStore:
     def opening_intro(self, id):
         row = self.openings[self.pins[id][2]]
         return row['text'], row['audio']
+    def answer_setup(self, id, sid, action, verdict=None):
+        from app.answering import transition
+        from app.answering_store import clock
+        with self.answer_lock:
+            row = self.get('calls', id)
+            eligible = row['active'] and row['status_final'] == 'ligando' and not row['stream_sid']
+            if row['sid'] is not None or eligible: row = self.identify(id, sid)
+            if not eligible: return 'hangup', None
+            state = self.answering.setdefault(id, dict(hello_issued_at=None, verdict=None, polls=0))
+            directive, outcome, human = transition(row,state,action,verdict,clock(None))
+            digest = None
+            if directive == 'hello':
+                digest = self.pins[id][1]
+                if self.openings[digest]['text'] != 'Alô?': raise LookupError()
+            if outcome: self.outcome(id,outcome)
+            if human: self.human(id)
+            return directive, digest
+    def hello_audio(self, digest):
+        row = self.openings.get(digest)
+        if not row or row['text'] != 'Alô?' or row['audio'] is None: raise LookupError()
+        return row['audio']
     def abort_undialed(self, id):
         assert self.calls[id]['sid'] is None
         self.calls[id].update(active=False, status_final='falha_tecnica')
@@ -73,7 +95,7 @@ class MemoryStore:
         if any(c['active'] for c in self.calls.values()): raise ValueError('active call')
         id = len(self.calls) + 1
         self.calls[id] = dict(id=id, lead_id=lead_id, product_id=product_id,
-            status_final='ligando', active=True, sid=None, stream_sid=None,
+            status_final='ligando', active=True, human=False, sid=None, stream_sid=None,
             duration_seconds=0, recording_status='pending', transcription_json=[], audio=None)
         if opening: self.pins[id] = opening
         return dict(self.calls[id])
@@ -102,7 +124,7 @@ class MemoryStore:
     def human(self, id): self.calls[id]['human'] = True
     def claim_stream(self, id, sid, stream):
         c = self.identify(id, sid)
-        if not c['active'] or not c.get('human') or self.calls[id]['stream_sid']:
+        if not c['active'] or c['status_final'] != 'ligando' or not c.get('human') or self.calls[id]['stream_sid']:
             raise ValueError('stream mismatch')
         self.calls[id]['stream_sid'] = stream
         return c
@@ -134,10 +156,19 @@ class API(unittest.TestCase):
         self.assertEqual(self.post('/products', {'name': 'Produto', 'description': 'Descrição'}).status_code, 201)
         self.assertEqual(self.post('/leads', {'name': 'Ana', 'phone': '+5511999999999', 'company': 'ACME'}).status_code, 201)
         return self.post('/calls', {'lead_id': 1, 'product_id': 1})
-    def callback(self, path, data, valid=True):
+    def raw_callback(self, path, data, valid=True):
         material = self.settings.public_base + path + ''.join(k + str(data[k]) for k in sorted(data))
         sig = base64.b64encode(hmac.new(b'test-token', material.encode(), hashlib.sha1).digest()).decode()
         return self.client.post(path, data=data, headers={'X-Twilio-Signature': sig if valid else 'bad'})
+    def callback(self, path, data, valid=True):
+        # Existing media tests follow real signed answer -> dedicated AMD -> gate, never a human bypass.
+        response = API.raw_callback(self, path, data, valid)
+        if valid and response.status_code == 200 and path.startswith('/twilio/voice/') and 'AnsweredBy' in data:
+            id = path.rsplit('/',1)[1]
+            amd = API.raw_callback(self, '/twilio/amd/'+id, data)
+            if amd.status_code != 200: return amd
+            return API.raw_callback(self, '/twilio/gate/'+id, {'CallSid':data['CallSid']})
+        return response
     def test_admin_and_validation_are_non_mutating(self):
         self.assertEqual(self.client.get('/health').status_code, 200)
         for route in ['/products', '/leads', '/calls']:

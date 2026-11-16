@@ -5,7 +5,6 @@ import logging
 import re
 import time
 from typing import Optional
-from xml.sax.saxutils import escape
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, WebSocket
 from pydantic import BaseModel, ConfigDict, Field
 from .config import Settings
@@ -15,6 +14,7 @@ from .security import public_url, signature_valid, websocket_signature_valid
 from .store import Store
 from .voice import session
 from .openings import prepared_call
+from .answering import VERDICTS, twiml, ulaw_wav
 
 
 class Product(BaseModel):
@@ -81,10 +81,13 @@ def create_app(settings=None, store=None, providers=None):
             raise HTTPException(403, 'Invalid Twilio signature')
         return form
 
-    async def identified(id, form):
+    def call_sid(form):
         sid = form.get('CallSid', '')
         if not re.fullmatch(r'CA[0-9a-fA-F]{32}', sid): raise HTTPException(422, 'Invalid CallSid')
-        return await run('identify', id, sid)
+        return sid
+
+    async def identified(id, form):
+        return await run('identify', id, call_sid(form))
 
     @app.get('/health')
     async def health():
@@ -210,21 +213,32 @@ def create_app(settings=None, store=None, providers=None):
         try: return await run('billing_save', id, sid, status, amount, currency, error_code)
         except Exception: raise HTTPException(503, 'Accounting unavailable')
 
-    @app.post('/twilio/voice/{id}')
-    async def voice(id: int, request: Request):
+    async def setup(id, request, action):
         form = await signed(request)
-        row = await identified(id, form)
-        amd = form.get('AnsweredBy', 'unknown')
-        if row['active'] and row['status_final'] == 'ligando' and amd == 'human':
-            url = s.public_base.replace('https://', 'wss://', 1) + f'/twilio/stream/{id}'
-            await run('human', id)
-            xml = '<Response><Connect><Stream url="' + escape(url, {'"': '&quot;'}) + '"/></Connect></Response>'
-        else:
-            outcome = ('caixa_postal' if amd.startswith('machine') else
-                       'numero_errado' if amd == 'fax' else 'inconclusivo')
-            await run('outcome', id, outcome)
-            xml = '<Response><Hangup/></Response>'
-        return Response(xml, media_type='application/xml')
+        sid = call_sid(form)
+        verdict = form.get('AnsweredBy') if action == 'amd' else None
+        if action == 'amd' and verdict not in VERDICTS: raise HTTPException(422, 'Invalid AMD verdict')
+        directive, digest = await run('answer_setup', id, sid, action, verdict)
+        if action == 'amd': return {'ok': True}
+        return Response(twiml(directive,digest,s.public_base,id), media_type='application/xml')
+
+    @app.post('/twilio/voice/{id}')
+    async def voice(id: int, request: Request): return await setup(id, request, 'voice')
+
+    @app.post('/twilio/amd/{id}')
+    async def amd(id: int, request: Request): return await setup(id, request, 'amd')
+
+    @app.post('/twilio/gate/{id}')
+    async def gate(id: int, request: Request): return await setup(id, request, 'gate')
+
+    @app.get('/media/hello/{digest}.wav')
+    async def hello(digest: str, request: Request):
+        if not re.fullmatch(r'[0-9a-f]{64}', digest) or request.scope.get('query_string'):
+            raise HTTPException(404, 'Not found')
+        audio = await run('hello_audio', digest)  # Restricted persisted text/format, never a provider call.
+        headers = {'Cache-Control':'public, max-age=31536000, immutable', 'ETag':'"'+digest+'"'}
+        if request.headers.get('if-none-match') == headers['ETag']: return Response(status_code=304, headers=headers)
+        return Response(ulaw_wav(audio), media_type='audio/wav', headers=headers)
 
     @app.post('/twilio/status/{id}')
     async def status(id: int, request: Request):

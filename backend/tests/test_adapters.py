@@ -41,7 +41,9 @@ class Adapters(unittest.IsolatedAsyncioTestCase):
         def transport(request):
             form = parse_qs(request.content.decode())
             self.assertEqual(form['MachineDetection'], ['DetectMessageEnd'])
-            self.assertEqual(form['AsyncAmd'], ['false'])
+            self.assertEqual(form['AsyncAmd'], ['true'])
+            self.assertEqual(form['AsyncAmdStatusCallback'], ['https://voice.example/prefix/twilio/amd/7'])
+            self.assertEqual(form['AsyncAmdStatusCallbackMethod'], ['POST'])
             self.assertEqual(form['Record'], ['true'])
             self.assertEqual(form['Url'], ['https://voice.example/prefix/twilio/voice/7'])
             self.assertEqual(form['RecordingStatusCallback'], ['https://voice.example/prefix/twilio/recording/7'])
