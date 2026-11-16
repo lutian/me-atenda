@@ -1,0 +1,9 @@
+fastapi==0.115.12
+uvicorn[standard]==0.34.2
+pydantic==2.11.3
+psycopg[binary]==3.2.6
+httpx==0.28.1
+python-multipart==0.0.20
+openai==1.76.2
+faster-whisper==1.1.1
+numpy==2.2.5
