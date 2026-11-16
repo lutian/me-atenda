@@ -7,8 +7,8 @@ import json
 import re
 from starlette.websockets import WebSocketDisconnect
 
-NOTICE = ('Olá! Sou uma assistente de inteligência artificial. Esta ligação está sendo gravada. '
-          'Você tem disponibilidade e concorda em conversar sobre nosso produto?')
+NOTICE = ('Olá, meu nome é Bia, sou Representante de {product_name}, gostaria de apresentar '
+          'para vocês o nosso produto. É com você que posso falar?')
 MAX_MESSAGE = 8192
 MAX_ULAW = 3200  # 400ms per frame, usual Twilio frame is 160 bytes.
 MAX_PCM = 16000 * 2 * 20
@@ -78,7 +78,8 @@ async def session(ws, id, store, providers):
 
     async def conversation():
         nonlocal draining
-        await output(NOTICE)
+        product = await db('get', 'products', bound['product_id'])
+        await output(NOTICE.format(product_name=product['name']))
         while True:
             pcm = await queue.get()
             try:

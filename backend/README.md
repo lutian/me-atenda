@@ -229,10 +229,17 @@ quality, local model accuracy, Docker integration or live recording delivery.
 ## Consent, privacy and operational safety
 
 Obtain lawful permission and check local telemarketing, do-not-call and recording
-consent rules **before dialing**. Use only authorized test recipients. The opening
-identifies the AI and announces recording, but Twilio recording starts at answer:
-this notice alone does not satisfy all jurisdictions' prior-consent rules. Configure
-a lawful consent process before using this system. Refusals should end the call.
+consent rules **before dialing**. Use only authorized test recipients. The opening is:
+
+> Olá, meu nome é Bia, sou Representante de {título do produto}, gostaria de apresentar para vocês o nosso produto. É com você que posso falar?
+
+`{título do produto}` is the selected stored product's `name`, not a model-generated
+name. The chat prompt identifies the agent as Bia; refusal, outcome and context
+instructions remain unchanged. This opening no longer identifies the AI or announces
+recording. Recording remains enabled and Twilio starts it at answer. Operators must
+provide required AI/recording notices and obtain lawful prior consent through an
+appropriate process before using this system; the opening question is not proof of
+consent. Refusals should end the call.
 Transcripts/audio contain personal information: restrict database access, encrypt
 storage/backups, define retention/deletion, and do not expose PostgreSQL publicly.
 No live call or paid-provider validation is implied by the offline tests.
