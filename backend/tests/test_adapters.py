@@ -68,7 +68,7 @@ class Adapters(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await p.answer(history, context), {'text': 'Vamos conversar?', 'outcome': None})
         create.assert_awaited_once_with(model=p.s.chat_model,
             messages=[{'role': 'system', 'content': expected}] + history[-24:],
-            response_format={'type': 'json_object'}, max_tokens=300)
+            response_format={'type': 'json_object'}, max_completion_tokens=300)
         create.return_value = NS(usage=None, choices=[NS(message=NS(
             content='{"text":"Vamos conversar?","outcome":"inventado"}'))])
         with self.assertRaisesRegex(ValueError, '^invalid structured outcome$'):

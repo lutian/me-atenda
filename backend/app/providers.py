@@ -140,7 +140,7 @@ class Providers:
                   'Use null enquanto a conversa continuar.\nContexto:\n' + context)
         response = await self.ai.chat.completions.create(
             model=self.s.chat_model, messages=[{'role': 'system', 'content': system}] + history[-24:],
-            response_format={'type': 'json_object'}, max_tokens=300)
+            response_format={'type': 'json_object'}, max_completion_tokens=300)
         capture(response)
         result = json.loads(response.choices[0].message.content)
         if (not isinstance(result.get('text'), str) or not 1 <= len(result['text']) <= 1800

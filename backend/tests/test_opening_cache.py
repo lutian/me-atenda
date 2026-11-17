@@ -61,7 +61,9 @@ class Cache(unittest.TestCase):
                         self.assertEqual((await client.get('/calls')).json(), [])
                 # Separate voices prevent reuse between the two scenarios.
                 self.settings.tts_voice = str(cancel)
-                with patch.object(self.store, 'preparation_guard', guard), patch('app.openings.PREP_SECONDS', .05):
+                # Cancellation must not race the separate artificial 50ms timeout scenario.
+                with patch.object(self.store, 'preparation_guard', guard), patch(
+                        'app.openings.PREP_SECONDS', 20 if cancel else .05):
                     asyncio.run(scenario())
                 self.assertEqual(spoken, ['Alô?'])
 
