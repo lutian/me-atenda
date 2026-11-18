@@ -76,7 +76,7 @@ class ActiveReply(unittest.TestCase):
         def retrieve(product_id, vector):
             trace.append('retrieve')
             return 'Produto fictício'
-        async def answer(history, context, agent_name="Bia", scripts=()):
+        async def answer(history, context, agent_name="Bia", scripts=(), goal=None):
             trace.append('answer')
             return await reply.answer(history, context)
         async def speak(text, voice=None):

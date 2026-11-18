@@ -6,7 +6,7 @@ import re
 import time
 from typing import Optional
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, WebSocket
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from .config import Settings
 from .providers import CallCreationRejected, Providers, voices
 from .observability import Recorder, billed_empty, call_scope
@@ -21,12 +21,19 @@ class Product(BaseModel):
     model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
     name: str = Field(min_length=1, max_length=200)
     description: str = Field(min_length=1, max_length=20000)
+    # What the call must achieve (sell, collect data, book a meeting); empty means no explicit goal.
+    goal: Optional[str] = Field(default=None, max_length=500)
+
+    @field_validator('goal')
+    @classmethod
+    def blank_goal(cls, value): return value or None
 
 
 class ProductPatch(BaseModel):
     model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
     name: Optional[str] = Field(default=None, min_length=1, max_length=200)
     description: Optional[str] = Field(default=None, min_length=1, max_length=20000)
+    goal: Optional[str] = Field(default=None, max_length=500)  # An empty string clears the goal.
 
 
 class Lead(BaseModel):
@@ -157,7 +164,7 @@ def create_app(settings=None, store=None, providers=None):
         old = await run('get', 'products', id)
         payload = data.model_dump(exclude_unset=True)
         if any(v is None for v in payload.values()): raise HTTPException(422, 'Null fields not allowed')
-        merged = Product(**({k: old[k] for k in ('name', 'description')} | payload)).model_dump()
+        merged = Product(**({k: old.get(k) for k in ('name', 'description', 'goal')} | payload)).model_dump()
         return await save_product(merged, id)
 
     @app.get('/products/{id}/messages', dependencies=[Depends(admin)])
@@ -169,7 +176,8 @@ def create_app(settings=None, store=None, providers=None):
     async def draft_messages(id: int):
         product = await run('get', 'products', id)
         profile = await run('agent_profile')
-        try: draft = await provider.draft(product['name'], product['description'], profile['agent_name'])
+        try: draft = await provider.draft(product['name'], product['description'], profile['agent_name'],
+                                          goal=product.get('goal'))
         except Exception: raise HTTPException(503, 'Draft unavailable; write the texts manually or retry')
         return {'opening': draft['opening'], 'pitch': draft['pitch'], 'goodbye': GOODBYE}
 

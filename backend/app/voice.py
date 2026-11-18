@@ -158,6 +158,8 @@ async def session(ws, id, store, providers):
         text, audio = await db('opening_intro', id)
         await output(text, padded(audio))
         prepared = await db('opening_scripts', id)
+        try: goal = (await db('get', 'products', bound['product_id'])).get('goal')
+        except LookupError: goal = None
         pitched = False
         while True:
             pcm = await queue.get()
@@ -182,7 +184,7 @@ async def session(ws, id, store, providers):
                     history = [turn for turn in current['transcription_json']
                                if not (turn['role'] == 'user' and is_filler(turn['content']))]
                     result = await providers.answer(history, context,
-                                                    bound.get('agent_name') or 'Bia', offered)
+                                                    bound.get('agent_name') or 'Bia', offered, goal=goal)
                 if not await can_speak(): continue
                 script = result.get('script')
                 if script in offered:

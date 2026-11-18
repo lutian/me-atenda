@@ -52,7 +52,7 @@ class AgentProfile(unittest.TestCase):
         async def speak(text, voice=None):
             voices.append(voice)
             return await original(text, voice)
-        async def answer(history, context, agent_name='Bia', scripts=()):
+        async def answer(history, context, agent_name='Bia', scripts=(), goal=None):
             names.append(agent_name)
             return {'text': 'Posso explicar?', 'outcome': None}
         self.provider.speak = speak; self.provider.answer = answer

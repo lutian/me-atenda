@@ -70,3 +70,11 @@ A regra só decide quando **todas** as palavras da fala são reconhecidas; cumpr
 Depois de **Iniciar UMA ligação**, a tela **Leads** mostra a conversa da chamada como um chat: o lead à esquerda, o agente à direita. A tela consulta `GET /calls/{id}` a cada 2 segundos enquanto a chamada está em `ligando`; quando ela termina, mostra o status final e para de consultar. Uma falha momentânea do backend aparece como aviso, e a consulta continua.
 
 O **Histórico** usa o mesmo chat na "Transcrição completa", com o JSON num painel recolhível e o botão de download como antes. O conteúdo é sempre exibido como texto puro, nunca como Markdown ou HTML.
+
+## Objetivo da ligação por produto
+
+Cada produto pode ter um **objetivo da ligação** (`goal`, opcional, até 500 caracteres; vazio limpa). Ele não entra nos embeddings: é uma instrução, não conhecimento sobre o produto.
+
+- **Rascunho:** `POST /products/{id}/messages/draft` envia o objetivo ao modelo, e a pergunta final da apresentação conduz a ele.
+- **Conversa:** o agente recebe "Objetivo da ligação: …" e conduz a conversa até ele. `sucesso` passa a exigir que o cliente aceite explicitamente esse objetivo. Sem objetivo, vale a regra anterior (aceitar um próximo passo).
+- O objetivo é lido do produto no início do stream de cada chamada. As mensagens preparadas não são invalidadas ao mudá-lo; o operador gera os textos de novo se quiser.

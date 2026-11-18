@@ -29,7 +29,7 @@ class FillerConversation(unittest.TestCase):
         heard = iter(['Alô? Alô?', 'Pode falar.'])
         histories, spoken = [], []
         async def transcribe(pcm): return next(heard)
-        async def answer(history, context, agent_name='Bia', scripts=()):
+        async def answer(history, context, agent_name='Bia', scripts=(), goal=None):
             histories.append([dict(turn) for turn in history])
             return {'text': 'Cuida da parte técnica?', 'outcome': None, 'script': None}
         async def speak(text, voice=None):

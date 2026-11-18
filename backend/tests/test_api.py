@@ -172,9 +172,9 @@ class Providers:
     async def download(self, sid): self.downloads.append(sid); return b'RIFFaudio'
     async def hangup(self, sid): self.stopped.append(sid)
     async def transcribe(self, pcm): return 'Tenho interesse'
-    async def answer(self, history, context, agent_name="Bia", scripts=()): return {'text': 'Vamos conversar?', 'outcome': None}
+    async def answer(self, history, context, agent_name="Bia", scripts=(), goal=None): return {'text': 'Vamos conversar?', 'outcome': None}
     async def speak(self, text, voice=None): return b'\xff' * 160
-    async def draft(self, name, description, agent_name):
+    async def draft(self, name, description, agent_name, goal=None):
         return {'opening': 'Abertura de teste?', 'pitch': 'Pitch de teste?'}
 
 

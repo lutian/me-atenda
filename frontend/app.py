@@ -33,6 +33,10 @@ def changed(message):
     st.rerun()
 
 
+LONG_FIELDS = ("description", "goal")
+OPTIONAL_FIELDS = ("goal",)
+
+
 def editor(resource, title, fields):
     """One CRUD flow reused by both product and lead sections."""
     st.header(title)
@@ -40,13 +44,13 @@ def editor(resource, title, fields):
     st.dataframe(records, use_container_width=True, hide_index=True)
     with st.expander("Cadastrar", expanded=not records):
         with st.form(f"new-{resource}", clear_on_submit=True):
-            values = {field: (st.text_area(label) if field == "description" else st.text_input(label))
+            values = {field: (st.text_area(label) if field in LONG_FIELDS else st.text_input(label))
                       for field, label in fields}
             submit = st.form_submit_button("Salvar cadastro")
         if submit:
             if resource == "leads":
                 values = parse_leads(json.dumps([values]), "manual.json")[0]
-            elif not all(value.strip() for value in values.values()):
+            elif not all(value.strip() for field, value in values.items() if field not in OPTIONAL_FIELDS):
                 st.warning("Preencha nome e descrição.")
                 return records
             api.create(resource, values)
@@ -55,14 +59,14 @@ def editor(resource, title, fields):
     if selected is not None:
         record = next(row for row in records if row["id"] == selected)
         with st.form(f"edit-{resource}-{selected}"):
-            values = {field: (st.text_area(label, value=record.get(field, "")) if field == "description"
+            values = {field: (st.text_area(label, value=record.get(field) or "") if field in LONG_FIELDS
                               else st.text_input(label, value=record.get(field, "") or ""))
                       for field, label in fields}
             save = st.form_submit_button("Salvar alterações")
         if save:
             if resource == "leads":
                 values = parse_leads(json.dumps([values]), "manual.json")[0]
-            elif not all(value.strip() for value in values.values()):
+            elif not all(value.strip() for field, value in values.items() if field not in OPTIONAL_FIELDS):
                 st.warning("Preencha nome e descrição.")
                 return records
             api.update(resource, selected, values)
@@ -256,7 +260,11 @@ if "notice" in st.session_state:
 page = st.sidebar.radio("Seção", ["Produtos", "Leads", "Histórico", "Observabilidade", "Configurações"])
 try:
     if page == "Produtos":
-        editor("products", "Produtos e serviços", [("name", "Nome"), ("description", "Descrição comercial")])
+        editor("products", "Produtos e serviços", [("name", "Nome"), ("description", "Descrição comercial"),
+                                                    ("goal", "Objetivo da ligação (opcional)")])
+        st.caption("Objetivo: o que a ligação precisa conseguir (vender, obter dados do lead, agendar uma reunião). "
+                   "Ele orienta os textos gerados e as respostas do agente, e a chamada só conta como sucesso "
+                   "quando o lead aceita esse objetivo.")
     elif page == "Leads":
         leads_page()
     elif page == "Histórico":

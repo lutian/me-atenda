@@ -37,7 +37,7 @@ class PreparedMessages(unittest.TestCase):
     def test_draft_uses_product_and_agent_without_persisting(self):
         self.product()
         seen = []
-        async def draft(name, description, agent_name):
+        async def draft(name, description, agent_name, goal=None):
             seen.append((name, description, agent_name))
             return {'opening': OPENING, 'pitch': PITCH}
         self.provider.draft = draft

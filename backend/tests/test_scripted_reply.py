@@ -29,7 +29,7 @@ class ScriptedReply(unittest.TestCase):
         async def speak(text, voice=None):
             spoken.append(text)
             return await original(text, voice)
-        async def answer(history, context, agent_name='Bia', scripts=()):
+        async def answer(history, context, agent_name='Bia', scripts=(), goal=None):
             offered.append(list(scripts))
             return replies.pop(0)
         self.provider.speak = speak; self.provider.answer = answer

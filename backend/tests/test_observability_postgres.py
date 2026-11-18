@@ -102,7 +102,7 @@ class ObservabilityPostgreSQL(fixtures.PostgreSQL):
         self.store.connection = connection
         with self.store.connection() as db:
             db.execute((Path(__file__).parent.parent/'migrations/001_initial.sql').read_text())
-        self.store.product({'name':'Existing','description':'Unchanged'}, [])
+            db.execute("INSERT INTO products(name,description) VALUES('Existing','Unchanged')")
         self.store.lead({'name':'Existing','phone':'+15551234567','company':''})
         # Seed genuine pre-policy history using the old schema, not new reserve().
         with self.store.connection() as db:
@@ -112,6 +112,7 @@ class ObservabilityPostgreSQL(fixtures.PostgreSQL):
         self.store.recording(call['id'], 'RE'+'4'*32, b'RIFFexisting')
         self.store.migrate()
         self.store.migrate()
+        self.assertIsNone(self.store.get('products', 1)['goal'])  # Additive column; old rows untouched.
         restarted = TestClient(create_app(self.settings, self.store, self.provider))
         self.assertEqual(restarted.get('/products',headers=self.headers).json()[0]['name'], 'Existing')
         result = restarted.get('/calls/1',headers=self.headers).json()

@@ -134,12 +134,12 @@ Se a URL pública mudar, atualize `PUBLIC_BASE_URL` no `.env` e recrie o backend
 Abra http://localhost:8501.
 
 1. **Configurações → Agente de voz:** escolha a voz e o nome do agente (por exemplo "Bia") e clique em **Salvar agente**. Em **Configurações** também fica a duração máxima da chamada.
-2. **Produtos → Cadastrar:** informe o nome e a descrição comercial. A descrição é a base de toda a conversa. A IA gera a partir dela as mensagens preparadas (abertura e apresentação), e durante a ligação o agente busca nela as respostas para o lead. Por isso a descrição precisa ser clara e completa:
-   - **o que é o produto** e para quem ele serve;
-   - **os benefícios e as informações** que o agente pode usar nas respostas (o agente não inventa o que não está escrito);
-   - **o objetivo da ligação**: vender o produto, obter os dados do lead, agendar uma reunião, etc.
+2. **Produtos → Cadastrar:** preencha os três campos. A IA gera a partir deles as mensagens preparadas (abertura e apresentação), e durante a ligação o agente busca na descrição as respostas para o lead.
+   - **Nome:** o nome que o agente fala na abertura.
+   - **Descrição comercial:** o que é o produto, para quem serve, benefícios e informações que o agente pode usar. Escreva de forma clara e completa: o agente não inventa o que não está escrito.
+   - **Objetivo da ligação (opcional):** o que a ligação precisa conseguir, por exemplo "Agendar uma demonstração de 30 minutos com o responsável técnico", "Vender o plano anual" ou "Obter o e-mail e o cargo do responsável pelas compras". O objetivo orienta a pergunta final da apresentação gerada e as respostas do agente, e a chamada só é classificada como `sucesso` quando o lead aceita esse objetivo. Sem objetivo, `sucesso` significa que o lead aceitou um próximo passo qualquer.
 
-   O sistema não tem um campo separado para o objetivo: escreva-o na própria descrição, por exemplo "O objetivo da ligação é agendar uma demonstração de 30 minutos com o responsável técnico". Salvar o produto gera embeddings, com custo pequeno.
+   Salvar o produto gera embeddings da descrição, com custo pequeno. Mudar o objetivo vale para as próximas ligações, mas não reescreve as mensagens já salvas: se quiser que a apresentação reflita o novo objetivo, gere os textos de novo no passo 4.
 3. **Leads:** cadastre nome e telefone em E.164 (`+5511999999999`), ou importe um JSON/CSV ([formatos](#leads-e-chamada-unitária)).
 4. **Leads → Disparo unitário:** escolha o lead e o produto. Nos campos de mensagens:
    - **Gerar texto com IA** sugere a abertura e a apresentação; revise ou escreva à mão;
@@ -359,7 +359,7 @@ Ao mudar a URL: mantenha o proxy restrito, reinicie `ngrok http 8002`, ajuste `P
 
 Na seção **Produtos**, use **Cadastrar → Salvar cadastro**. Para alterações, escolha o registro em **Editar ou excluir → Salvar alterações**; a exclusão requer confirmação separada. Criação/edição pode gerar custo de embeddings, registrado globalmente, não replicado em cada ligação.
 
-Cadastre **nome e descrição comercial**; edite ou exclua selecionando explicitamente um cadastro. O backend mantém embeddings/RAG. Registros usados no histórico podem ter exclusão recusada; o painel mostra o código HTTP sem expor detalhes internos. Revise a descrição para evitar promessas comerciais indevidas.
+Cadastre **nome, descrição comercial e, opcionalmente, o objetivo da ligação** (veja o [passo 8](#8-configurar-o-agente-cadastrar-e-ligar)); edite ou exclua selecionando explicitamente um cadastro. O backend mantém embeddings/RAG. Registros usados no histórico podem ter exclusão recusada; o painel mostra o código HTTP sem expor detalhes internos. Revise a descrição para evitar promessas comerciais indevidas.
 
 ### Leads e chamada unitária
 

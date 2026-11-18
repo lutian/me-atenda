@@ -121,7 +121,7 @@ class AnsweringPostgreSQL(unittest.TestCase):
         with self.store.connection() as db:
             for name in ('001_initial.sql','002_observability.sql','003_opening_audio.sql'):
                 db.execute((Path(__file__).parent.parent/'migrations'/name).read_text())
-        self.store.product({'name':'Existing','description':'Existing'}, [])
+            db.execute("INSERT INTO products(name,description) VALUES('Existing','Existing')")
         self.store.lead({'name':'Existing','phone':'+15551234567','company':''})
         # New reserve() requires the new policy; this fixture is deliberately old.
         with self.store.connection() as db:
