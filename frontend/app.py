@@ -253,6 +253,57 @@ def settings_page():
             st.error(str(exc))
             return
         changed("Agente salvo. Será aplicado às próximas chamadas.")
+    pricing_form()
+
+
+# (group, rate key, label) per configured model kind; Whisper runs locally and has no provider rate.
+PRICE_FIELDS = {
+    "chat": [("input_per_million", "Entrada, por 1 milhão de tokens"),
+             ("cached_input_per_million", "Entrada em cache, por 1 milhão de tokens"),
+             ("output_per_million", "Saída, por 1 milhão de tokens")],
+    "embedding": [("input_per_million", "Entrada, por 1 milhão de tokens")],
+    "tts": [("characters_per_million", "Por 1 milhão de caracteres")],
+}
+PRICE_TITLES = {"chat": "Chat (respostas e rascunhos)", "embedding": "Embeddings (busca na descrição)",
+                "tts": "Voz (TTS)"}
+TWILIO_FIELDS = [("voice_per_minute", "Ligação, por minuto"), ("amd_per_call", "Detecção de secretária (AMD), por chamada")]
+
+
+def pricing_form():
+    st.subheader("Custos por uso (USD)")
+    prices = api.pricing_settings()
+    models = prices["configured_models"]
+    source = {"settings": "salvos neste painel", "environment": "variável OBSERVABILITY_PRICING_JSON",
+              "none": "nenhum valor configurado"}.get(prices["source"], prices["source"])
+    st.caption(f"Valores em vigor: {source}. Use ponto como separador decimal (0.15). Campos vazios ficam sem preço, "
+               "e o custo dessas operações aparece como desconhecido.")
+    st.caption("OpenAI: veja os preços de cada modelo em https://openai.com/api/pricing. Twilio: veja a tarifa de "
+               "chamadas de saída para o país do lead em https://www.twilio.com/en-us/voice/pricing.")
+    st.caption("Os novos valores valem para as próximas requisições e ligações; eventos antigos mantêm o preço da época.")
+    with st.form("pricing"):
+        values = {}
+        for kind, fields in PRICE_FIELDS.items():
+            model = models[kind]
+            st.markdown(f"**{PRICE_TITLES[kind]}**")
+            st.caption(f"Modelo: {model}")
+            saved = prices["models"].get(model, {})
+            values[kind] = {rate: st.text_input(label, value=saved.get(rate, ""), key=f"price-{kind}-{rate}")
+                            for rate, label in fields}
+        st.markdown("**Twilio**")
+        twilio = {rate: st.text_input(label, value=prices["twilio"].get(rate, ""), key=f"price-twilio-{rate}")
+                  for rate, label in TWILIO_FIELDS}
+        save = st.form_submit_button("Salvar custos")
+    if save:
+        rates = {}
+        for kind, fields in values.items():
+            filled = {rate: value.strip() for rate, value in fields.items() if value.strip()}
+            # Kinds may share a model name; merge instead of overwriting.
+            if filled: rates.setdefault(models[kind], {}).update(filled)
+        try: api.save_pricing_settings(rates, {k: v.strip() for k, v in twilio.items() if v.strip()})
+        except ValueError as exc:
+            st.error(str(exc))
+            return
+        changed("Custos salvos. Valem para as próximas requisições e ligações.")
 
 
 if "notice" in st.session_state:

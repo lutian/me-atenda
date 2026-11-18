@@ -1,5 +1,6 @@
 """Server-side API boundary. Never pass the API key or upstream URLs to widgets."""
 import json
+import re
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
@@ -10,6 +11,7 @@ class NoRedirect(HTTPRedirectHandler):
 
 
 MESSAGE_FIELDS = ('opening', 'pitch', 'goodbye')
+RATE = re.compile(r'\d{1,18}(?:\.\d{1,18})?')
 
 
 class APIError(Exception):
@@ -92,6 +94,23 @@ class APIClient:
             raise ValueError('Select a voice.')
         return self._agent_profile(self._request('PATCH', '/settings/agent',
                                                  {'agent_name': name.strip(), 'tts_voice': voice}))
+
+    @staticmethod
+    def _pricing(data):
+        keys = ('source', 'version', 'models', 'twilio', 'configured_models')
+        if (not isinstance(data, dict) or any(k not in data for k in keys) or not isinstance(data['models'], dict)
+                or not isinstance(data['twilio'], dict) or not isinstance(data['configured_models'], dict)):
+            raise APIError('Backend returned invalid pricing.')
+        return {k: data[k] for k in keys}
+
+    def pricing_settings(self):
+        return self._pricing(self._request('GET', '/settings/pricing'))
+
+    def save_pricing_settings(self, models, twilio):
+        rates = [rate for group in models.values() for rate in group.values()] + list(twilio.values())
+        if not all(isinstance(rate, str) and RATE.fullmatch(rate) for rate in rates):
+            raise ValueError('Rates must be non-negative numbers with a dot as decimal separator, e.g. 0.15.')
+        return self._pricing(self._request('PUT', '/settings/pricing', {'models': models, 'twilio': twilio}))
 
     @staticmethod
     def _messages(data, status=True):

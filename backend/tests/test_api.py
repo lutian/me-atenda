@@ -1,6 +1,7 @@
 """Public-interface offline contract checks; no provider calls."""
 import audioop
 import base64
+import json
 import hashlib
 import hmac
 import unittest
@@ -77,6 +78,8 @@ class MemoryStore:
         self.events.append(dict(event, id=len(self.events)+1))
         return len(self.events)
     def event_finish(self, id, event): self.events[id-1].update(event)
+    def pricing_settings(self): return getattr(self, 'pricing', None)
+    def save_pricing_settings(self, config): self.pricing = json.loads(json.dumps(config))
     def account_call(self, id, snapshot): self.snapshots.setdefault(id, snapshot)
     def health(self): return True
     def list(self, table): return list(getattr(self, table).values())

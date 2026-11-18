@@ -125,6 +125,16 @@ class Store(AnsweringStore, OpeningStore, AccountingStore):
             if not row: raise RuntimeError('Call policy missing')
             return row
 
+    def pricing_settings(self):
+        with self.connection() as db:
+            row = db.execute('SELECT config FROM pricing_settings WHERE id=TRUE').fetchone()
+            return row['config'] if row else None
+
+    def save_pricing_settings(self, config):
+        with self.connection() as db:
+            db.execute('INSERT INTO pricing_settings(id,config) VALUES (TRUE,%s::jsonb) ON CONFLICT (id) '
+                       'DO UPDATE SET config=EXCLUDED.config, updated_at=now()', (json.dumps(config),))
+
     def save_agent_profile(self, name, voice):
         if not isinstance(name, str) or not 1 <= len(name) <= 40: raise ValueError('Invalid agent name')
         with self.connection() as db:

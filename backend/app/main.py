@@ -1,15 +1,17 @@
 """Frozen admin API and publicly reachable, signed Twilio callbacks."""
 import asyncio
+import json
 import hmac
 import logging
 import re
 import time
+from datetime import datetime, timezone
 from typing import Optional
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, WebSocket
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator
 from .config import Settings
 from .providers import CallCreationRejected, Providers, voices
-from .observability import Recorder, billed_empty, call_scope
+from .observability import Recorder, billed_empty, call_scope, pricing
 from .security import public_url, signature_valid, websocket_signature_valid
 from .store import Store
 from .voice import session
@@ -68,6 +70,13 @@ class AgentProfile(BaseModel):
     tts_voice: str = Field(min_length=1, max_length=20)
 
 
+class Pricing(BaseModel):
+    """USD rates as decimal strings; the server assigns the version."""
+    model_config = ConfigDict(extra='forbid')
+    models: dict[str, dict[str, StrictStr]] = {}
+    twilio: dict[str, StrictStr] = {}
+
+
 class Dial(BaseModel):
     model_config = ConfigDict(extra='forbid')
     lead_id: int = Field(gt=0)
@@ -79,6 +88,11 @@ def create_app(settings=None, store=None, providers=None):
     db = store or Store(s.database_url)
     provider = providers or Providers(s)
     recorder = Recorder(db, s)
+    try: stored = db.pricing_settings()
+    except Exception:
+        stored = None
+        logging.getLogger(__name__).warning('pricing_settings_unavailable')
+    if stored is not None: recorder.use(pricing(json.dumps(stored)), 'settings')
     if isinstance(provider, Providers): provider.observer = recorder
     app = FastAPI(title='Outbound agent', docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -144,6 +158,25 @@ def create_app(settings=None, store=None, providers=None):
     async def save_agent_profile(data: AgentProfile):
         if data.tts_voice not in voices(s.tts_model): raise HTTPException(422, 'Voice not supported by TTS model')
         return profile_view(await run('save_agent_profile', data.agent_name, data.tts_voice))
+
+    def pricing_view():
+        prices = recorder.prices
+        return {'source': recorder.source, 'version': prices.get('version'),
+                'models': prices.get('models', {}), 'twilio': prices.get('twilio', {}),
+                'configured_models': {'chat': s.chat_model, 'embedding': s.embedding_model, 'tts': s.tts_model}}
+
+    @app.get('/settings/pricing', dependencies=[Depends(admin)])
+    async def pricing_settings(): return pricing_view()
+
+    @app.put('/settings/pricing', dependencies=[Depends(admin)])
+    async def save_pricing_settings(data: Pricing):
+        version = 'painel-' + datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+        config = {'version': version, 'currency': 'USD', 'models': data.models, 'twilio': data.twilio}
+        try: prices = pricing(json.dumps(config))
+        except ValueError: raise HTTPException(422, 'Invalid rates: use non-negative decimal numbers')
+        await run('save_pricing_settings', config)
+        recorder.use(prices, 'settings')  # New events and calls only; snapshots keep history.
+        return pricing_view()
 
     @app.get('/products', dependencies=[Depends(admin)])
     async def products(): return await run('list', 'products')

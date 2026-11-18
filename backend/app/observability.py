@@ -154,6 +154,10 @@ class Recorder:
     def __init__(self, store, settings):
         self.store = store
         self.prices = pricing(settings.observability_pricing_json)
+        self.source = 'environment' if self.prices else 'none'
+
+    def use(self, prices, source):
+        self.prices, self.source = prices, source
 
     def event(self, call_id, provider, operation, model):
         rates = dict(self.prices.get('models', {}).get(model, {}))
