@@ -261,19 +261,41 @@ def create_app(settings=None, store=None, providers=None):
         apply_selection(selection)
         return selection
 
+    async def embedding_model_id():
+        return (await run('model_selection')).get('embedding', {}).get('id')
+
+    async def product_views(rows):
+        names = {m['id']: m['name'] for m in await run('models')}
+        current = await embedding_model_id()
+        return [dict(row, embedding_model=names.get(row.get('embedding_model_id')),
+                     embeddings_current=row.get('embedding_model_id') == current) for row in rows]
+
+    async def require_current_embeddings(product_id):
+        product = await run('get', 'products', product_id)
+        if not (await product_views([product]))[0]['embeddings_current']:
+            raise HTTPException(409, 'Product embeddings are outdated; update them before using this product')
+        return product
+
     @app.get('/products', dependencies=[Depends(admin)])
-    async def products(): return await run('list', 'products')
+    async def products(): return await product_views(await run('list', 'products'))
 
     async def save_product(data, id=None):
         text = data['name'] + '\n' + data['description']
         chunks = [text[i:i+1200] for i in range(0, len(text), 1000)]
+        # Vectors are produced with the model in use now; the product records it.
+        data = dict(data, embedding_model_id=await embedding_model_id())
         try: vectors = await provider.embed(chunks)
         except Exception: raise HTTPException(503, 'Embedding provider unavailable')
         if len(vectors) != len(chunks): raise HTTPException(503, 'Incomplete embeddings')
-        return await run('product', data, list(zip(chunks, vectors)), id)
+        return (await product_views([await run('product', data, list(zip(chunks, vectors)), id)]))[0]
 
     @app.post('/products', status_code=201, dependencies=[Depends(admin)])
     async def product_create(data: Product): return await save_product(data.model_dump())
+
+    @app.post('/products/{id}/embeddings', dependencies=[Depends(admin)])
+    async def product_embeddings(id: int):
+        old = await run('get', 'products', id)
+        return await save_product({k: old.get(k) for k in ('name', 'description', 'goal')}, id)
 
     @app.patch('/products/{id}', dependencies=[Depends(admin)])
     async def product_update(id: int, data: ProductPatch):
@@ -290,7 +312,7 @@ def create_app(settings=None, store=None, providers=None):
 
     @app.post('/products/{id}/messages/draft', dependencies=[Depends(admin)])
     async def draft_messages(id: int):
-        product = await run('get', 'products', id)
+        product = await require_current_embeddings(id)
         profile = await run('agent_profile')
         try: draft = await provider.draft(product['name'], product['description'], profile['agent_name'],
                                           goal=product.get('goal'))
@@ -339,6 +361,7 @@ def create_app(settings=None, store=None, providers=None):
 
     @app.post('/calls', status_code=201, dependencies=[Depends(admin)])
     async def dial(data: Dial):
+        await require_current_embeddings(data.product_id)
         try:
             call = await prepared_call(db, provider, s, data.lead_id, data.product_id,
                                        recorder.prices, isinstance(provider, Providers))

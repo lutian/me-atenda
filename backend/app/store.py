@@ -67,11 +67,14 @@ class Store(AnsweringStore, OpeningStore, AccountingStore):
     def product(self, data, chunks, id=None):
         with self.connection() as db:
             if id is None:
-                row = db.execute('INSERT INTO products(name,description,goal) VALUES (%s,%s,%s) RETURNING *',
-                                 (data['name'], data['description'], data.get('goal'))).fetchone()
+                row = db.execute('INSERT INTO products(name,description,goal,embedding_model_id) '
+                                 'VALUES (%s,%s,%s,%s) RETURNING *',
+                                 (data['name'], data['description'], data.get('goal'),
+                                  data.get('embedding_model_id'))).fetchone()
             else:
-                row = db.execute('UPDATE products SET name=%s,description=%s,goal=%s WHERE id=%s RETURNING *',
-                                 (data['name'], data['description'], data.get('goal'), id)).fetchone()
+                row = db.execute('UPDATE products SET name=%s,description=%s,goal=%s,embedding_model_id=%s '
+                                 'WHERE id=%s RETURNING *', (data['name'], data['description'], data.get('goal'),
+                                                             data.get('embedding_model_id'), id)).fetchone()
                 if not row: raise LookupError('not found')
                 db.execute('DELETE FROM product_chunks WHERE product_id=%s', (id,))
             for text, vector in chunks:

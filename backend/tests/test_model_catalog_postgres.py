@@ -39,4 +39,27 @@ class ModelCatalogPostgreSQL(unittest.TestCase):
         self.assertEqual(self.models(restarted)['gpt-6.2-sol']['costs'], SOL)
 
 
+    def product(self, client=None):
+        return next(p for p in (client or self.client).get('/products', headers=self.headers).json() if p['id'] == 1)
+
+    def test_upgrade_binds_existing_products_once(self):
+        # Simulate a database from before the catalog: products without the column.
+        with self.store.connection() as db:
+            db.execute('ALTER TABLE products DROP COLUMN embedding_model_id')
+        self.store.migrate()
+        self.assertEqual((self.product()['embedding_model'], self.product()['embeddings_current']),
+                         ('text-embedding-3-small', True))
+        # Reapplying migrations never rebinds a product whose model was deleted.
+        models = self.models()
+        new = self.post('/models', {'name': 'text-embedding-3-large', 'kind': 'embedding', 'costs': {}}).json()['id']
+        ids = {k: v['id'] for k, v in self.client.get('/settings/models', headers=self.headers).json().items()}
+        self.assertEqual(self.client.put('/settings/models', json=dict(ids, embedding=new), headers=self.headers).status_code, 200)
+        self.assertEqual(self.client.delete(f"/models/{models['text-embedding-3-small']['id']}",
+                                            headers=self.headers).status_code, 204)
+        self.store.migrate()
+        self.assertEqual((self.product()['embedding_model'], self.product()['embeddings_current']), (None, False))
+        self.assertEqual(self.client.post('/products/1/embeddings', headers=self.headers).json()['embedding_model'],
+                         'text-embedding-3-large')
+
+
 if __name__ == '__main__': unittest.main()

@@ -107,7 +107,8 @@ class ObservabilityAPI(unittest.TestCase):
         self.store.calls[1]['sid'] = None
         self.assertEqual(self.post('/calls/1/billing/reconcile', {}).json(), billed_empty(1))
         self.assertEqual(self.client.get('/products', headers=self.headers).json(),
-                         [{'id':1,'name':'Produto','description':'Descrição','goal':None}])
+                         [{'id':1,'name':'Produto','description':'Descrição','goal':None,
+                          'embedding_model_id':3,'embedding_model':'text-embedding-3-small','embeddings_current':True}])
         self.assertEqual(self.callback('/twilio/status/1', {'CallSid':'CA'+'1'*32,
             'CallStatus':'completed','CallDuration':'61'}).status_code, 200)
         self.assertEqual(self.client.get('/calls/1', headers=self.headers).json()['duration_seconds'], 61)

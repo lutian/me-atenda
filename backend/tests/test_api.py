@@ -106,6 +106,8 @@ class MemoryStore:
     def model_delete(self, id):
         if id in self.active.values(): raise ValueError('Model in use')
         if self.catalog().pop(id, None) is None: raise LookupError()
+        for product in self.products.values():  # ON DELETE SET NULL.
+            if product.get('embedding_model_id') == id: product['embedding_model_id'] = None
     def model_selection(self):
         self.catalog()
         return {k: {'id': id, 'name': self.ai_models[id]['name']} for k, id in self.active.items()}
