@@ -4,6 +4,7 @@ import audioop
 import base64
 import binascii
 import json
+import logging
 import re
 from starlette.websockets import WebSocketDisconnect
 
@@ -45,6 +46,30 @@ class Utterance:
         result = bytes(self.buffer)
         self.buffer.clear()
         return result
+
+
+def enqueue(queue, pcm):
+    """While the worker is busy, merge pending speech instead of failing the call.
+
+    A lead repeating "Olá?" during a slow reply must not hang up the call; the merged
+    utterance keeps arrival order and the newest MAX_PCM bytes. Synchronous: no await
+    between taking and re-inserting, so the worker cannot interleave.
+    """
+    try:
+        queue.put_nowait(pcm)
+        return
+    except asyncio.QueueFull: pass
+    pending = []
+    while not queue.empty():
+        pending.append(queue.get_nowait())
+        queue.task_done()
+    queue.put_nowait(b''.join(pending + [pcm])[-MAX_PCM:])
+
+
+def failure_reason(exc):
+    # Own protocol/timeout messages are static; provider errors may carry URLs or data.
+    if type(exc) in (ValueError, TimeoutError) and str(exc): return f'{type(exc).__name__}: {str(exc)[:80]}'
+    return type(exc).__name__
 
 
 async def session(ws, id, store, providers):
@@ -165,9 +190,7 @@ async def session(ws, id, store, providers):
             if event == 'media':
                 if data.get('media', {}).get('track') != 'inbound': raise ValueError('unexpected media track')
                 pcm = utterance.feed(data['media']['payload'])
-                if pcm:
-                    try: queue.put_nowait(pcm)
-                    except asyncio.QueueFull: raise ValueError('audio backlog exceeded')
+                if pcm: enqueue(queue, pcm)
             elif event not in ('mark',): raise ValueError('unexpected event')
         await drain()
     except WebSocketDisconnect:
@@ -191,7 +214,9 @@ async def session(ws, id, store, providers):
             if results and isinstance(results[0], Exception): failure = results[0]
         if bound:
             # Never release a slot here; another call can already own it after a callback.
-            if failure: await db('outcome', id, 'falha_tecnica')
+            if failure:
+                logging.getLogger(__name__).warning('media_stream_failed %s', failure_reason(failure))
+                await db('outcome', id, 'falha_tecnica')
             try: await providers.hangup(bound['sid'])
             except Exception: pass
         try: await ws.close(code=1011 if failure else 1000)

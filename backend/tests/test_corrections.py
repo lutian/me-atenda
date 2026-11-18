@@ -168,4 +168,89 @@ class Corrections(unittest.TestCase):
                 self.assertEqual(self.post('/calls', {'lead_id': 1, 'product_id': 1}).status_code, 409)
 
 
+    def stream_while_stt_blocked(self, utterances, after=None):
+        """Send utterances while the worker is stuck in its first transcription, then stop."""
+        self.seed()
+        self.callback('/twilio/voice/1', {'CallSid': 'CA'+'1'*32, 'AnsweredBy': 'human'})
+        entered = threading.Event(); release = threading.Event()
+        transcribed = []
+        async def transcribe(pcm):
+            if not transcribed and not entered.is_set():
+                entered.set()
+                if not await asyncio.to_thread(release.wait, 15): raise TimeoutError('test release missing')
+            transcribed.append(len(pcm))
+            return 'utterance ' + str(len(transcribed))
+        self.provider.transcribe = transcribe
+        application = create_app(self.settings, self.store, self.provider)
+        accepted = threading.Event(); last = 1 + 31 * utterances
+        async def observed(scope, receive, send):
+            if scope['type'] != 'websocket': return await application(scope, receive, send)
+            seen = None
+            async def observed_receive():
+                nonlocal seen
+                if seen == last: accepted.set()
+                message = await receive()
+                if message['type'] == 'websocket.receive':
+                    seen = int(json.loads(message['text']).get('sequenceNumber', 0))
+                return message
+            await application(scope, observed_receive, send)
+        self.client = TestClient(observed)
+        url = self.settings.public_base + '/twilio/stream/1'
+        sig = base64.b64encode(hmac.new(b'test-token', url.encode(), hashlib.sha1).digest()).decode()
+        stream = 'MZ'+'5'*32
+        voiced = base64.b64encode(audioop.lin2ulaw(b'\x00\x20'*160, 2)).decode()
+        silent = base64.b64encode(b'\xff'*160).decode()
+        try:
+            with self.client.websocket_connect('/twilio/stream/1', headers={'X-Twilio-Signature': sig}) as ws:
+                ws.send_json({'event': 'start', 'streamSid': stream, 'start': {
+                    'streamSid': stream, 'callSid': 'CA'+'1'*32,
+                    'mediaFormat': {'encoding': 'audio/x-mulaw', 'sampleRate': 8000, 'channels': 1}}})
+                self.assertEqual(ws.receive_json()['event'], 'media')
+                sequence = 1
+                for index in range(utterances):
+                    for payload in [voiced] + [silent]*30:
+                        sequence += 1
+                        ws.send_json({'event': 'media', 'sequenceNumber': str(sequence), 'streamSid': stream,
+                                      'media': {'track': 'inbound', 'payload': payload}})
+                    if index == 0: self.assertTrue(entered.wait(2), 'first utterance never reached STT')
+                self.assertTrue(accepted.wait(2), 'utterances were not accepted')
+                if after: after(ws, sequence, stream)
+                else:
+                    ws.send_json({'event': 'stop', 'sequenceNumber': str(sequence+1), 'streamSid': stream,
+                                  'stop': {'callSid': 'CA'+'1'*32}})
+                release.set()
+                with self.assertRaises(WebSocketDisconnect) as closed: ws.receive_json()
+                code = closed.exception.code
+        finally: release.set()
+        return code, transcribed, self.client.get('/calls/1', headers=self.headers).json()
+
+    def test_backlog_while_agent_busy_coalesces_speech_instead_of_failing(self):
+        # Call 7: the lead kept saying "Olá?" during a long reply; the third queued
+        # utterance used to raise "audio backlog exceeded" and hang up as falha_tecnica.
+        code, transcribed, row = self.stream_while_stt_blocked(4)
+        self.assertEqual(code, 1000)
+        self.assertNotEqual(row['status_final'], 'falha_tecnica')
+        utterance = 31 * 160 * 2 * 2  # 31 frames at 160 mu-law bytes -> 16 kHz PCM16.
+        self.assertEqual(len(transcribed), 2)
+        self.assertEqual(transcribed, [utterance - 2, 3 * utterance])
+        self.assertEqual([r['content'] for r in row['transcription_json'] if r['role'] == 'user'],
+                         ['utterance 1', 'utterance 2'])
+
+    def test_previous_queue_capacity_still_holds_two_separate_utterances(self):
+        code, transcribed, row = self.stream_while_stt_blocked(3)
+        self.assertEqual(code, 1000)
+        self.assertEqual(len(transcribed), 3)
+        # Resampler warm-up trims two bytes from the first utterance only.
+        self.assertEqual(transcribed[1:], [transcribed[0] + 2] * 2)
+
+    def test_technical_failure_logs_bounded_reason(self):
+        def protocol_error(ws, sequence, stream):
+            ws.send_json({'event': 'bogus', 'sequenceNumber': str(sequence+1), 'streamSid': stream})
+        with self.assertLogs('app.voice', 'WARNING') as logs:
+            code, _, row = self.stream_while_stt_blocked(1, protocol_error)
+        self.assertEqual(code, 1011)
+        self.assertEqual(row['status_final'], 'falha_tecnica')
+        self.assertEqual(logs.output, ['WARNING:app.voice:media_stream_failed ValueError: unexpected event'])
+
+
 if __name__ == '__main__': unittest.main()
