@@ -15,3 +15,13 @@ Referência: [documentação oficial de Chat Completions](https://developers.ope
 Na imagem backend, `python -B -m unittest discover -s tests -p 'test_reply.py' -v` usa o SDK real com transporte HTTP falso, sem rede paga. Verifica a serialização do parâmetro moderno com o modelo configurado no cenário e com o padrão da aplicação. O teste de WebSocket mantém a chamada ativa até observar uma segunda emissão de áudio e os turnos `assistant,user,assistant`; somente então envia `stop`. Valida também a ausência de desligamento prematuro e a liberação do slot apenas após callback terminal.
 
 A suíte completa deve usar PostgreSQL descartável. Testes falsos não comprovam aceitação do provedor real: sondagens reais exigem autorização separada, dados fictícios e limites de requisições/tokens. Nunca publique corpo de erro, chave, URL configurada, telefone ou transcrição. Um teste da API de texto não comprova entrega de áudio pela operadora.
+
+## Fala do lead durante uma resposta lenta
+
+Enquanto a Bia processa ou fala, as falas do lead esperam numa fila de duas posições. Uma terceira fala não encerra mais a chamada: as falas pendentes são unidas em ordem, mantendo os últimos 20 segundos, e transcritas juntas. Antes, a chamada 7 caiu como `falha_tecnica` porque o lead repetiu "Olá?" durante uma pausa de cerca de 18 segundos.
+
+Toda `falha_tecnica` do stream registra `media_stream_failed <tipo>` no log. Mensagens próprias de protocolo (`ValueError`, `TimeoutError`) aparecem com até 80 caracteres; erros de provedores registram só o tipo, porque podem conter URLs ou dados.
+
+Na inicialização, o backend carrega o modelo Whisper em segundo plano. Assim, a primeira transcrição não paga cerca de 9 segundos de carga. Se a carga falhar, o log registra `whisper_warmup_failed <tipo>` e o modelo é carregado na primeira fala, como antes.
+
+As respostas não reapresentam a Bia nem repetem o que a abertura já disse, a menos que o cliente pergunte.

@@ -62,6 +62,11 @@ def create_app(settings=None, store=None, providers=None):
     if isinstance(provider, Providers): provider.observer = recorder
     app = FastAPI(title='Outbound agent', docs_url=None, redoc_url=None, openapi_url=None)
 
+    @app.on_event('startup')
+    async def warm_speech():
+        # Background: a slow model load must not delay health checks or callbacks.
+        if isinstance(provider, Providers): app.state.warmup = asyncio.create_task(provider.warm())
+
     async def run(name, *args):
         try: return await asyncio.to_thread(getattr(db, name), *args)
         except LookupError: raise HTTPException(404, 'Not found')
