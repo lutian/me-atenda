@@ -103,10 +103,12 @@ class MemoryStore:
         return self.call_policy()
     def product_messages(self, product_id):
         self.get('products', product_id)
-        return dict(self.messages.get(product_id, {'pitch': None, 'goodbye': None}))
-    def save_product_messages(self, product_id, pitch, goodbye):
+        return dict(self.messages.get(product_id, {'opening': None, 'pitch': None, 'goodbye': None,
+                                                   'agent_name': None}))
+    def save_product_messages(self, product_id, opening, pitch, goodbye, agent_name):
         self.get('products', product_id)
-        self.messages[product_id] = {'pitch': pitch, 'goodbye': goodbye}
+        self.messages[product_id] = {'opening': opening, 'pitch': pitch, 'goodbye': goodbye,
+                                     'agent_name': agent_name}
         return dict(self.messages[product_id])
     def openings_ready(self, digests):
         return all(self.openings.get(d, {}).get('audio') for d in digests)
@@ -173,7 +175,8 @@ class Providers:
     async def transcribe(self, pcm): return 'Tenho interesse'
     async def answer(self, history, context, agent_name="Bia", scripts=()): return {'text': 'Vamos conversar?', 'outcome': None}
     async def speak(self, text, voice=None): return b'\xff' * 160
-    async def draft(self, name, description, agent_name): return 'Pitch de teste?'
+    async def draft(self, name, description, agent_name):
+        return {'opening': 'Abertura de teste?', 'pitch': 'Pitch de teste?'}
 
 
 class API(unittest.TestCase):

@@ -3,6 +3,8 @@ import unittest
 import test_api as fixtures
 
 GOODBYE = 'Entendi, obrigado pelo seu tempo.'
+OPENING = 'Olá, aqui é a Bia, da Produto. Falo com o responsável pela parte técnica?'
+EMPTY = {'opening': None, 'pitch': None, 'goodbye': None, 'ready': False}
 PITCH = ('Queremos integrar o Produto ao sistema de vocês para processar transcrições. '
          'Você é responsável pela parte técnica?')
 
@@ -37,13 +39,13 @@ class PreparedMessages(unittest.TestCase):
         seen = []
         async def draft(name, description, agent_name):
             seen.append((name, description, agent_name))
-            return PITCH
+            return {'opening': OPENING, 'pitch': PITCH}
         self.provider.draft = draft
         result = self.client.post('/products/1/messages/draft', headers=self.headers)
         self.assertEqual(result.status_code, 200)
-        self.assertEqual(result.json(), {'pitch': PITCH, 'goodbye': GOODBYE})
+        self.assertEqual(result.json(), {'opening': OPENING, 'pitch': PITCH, 'goodbye': GOODBYE})
         self.assertEqual(seen, [('Produto', 'Integração de cartórios', 'Bia')])
-        self.assertEqual(self.messages(), {'pitch': None, 'goodbye': None, 'ready': False})
+        self.assertEqual(self.messages(), EMPTY)
         self.assertEqual(self.client.post('/products/9/messages/draft', headers=self.headers).status_code, 404)
         self.assertEqual(self.client.post('/products/1/messages/draft').status_code, 401)
 
@@ -54,22 +56,20 @@ class PreparedMessages(unittest.TestCase):
         result = self.client.post('/products/1/messages/draft', headers=self.headers)
         self.assertEqual(result.status_code, 503)
         self.assertNotIn('secret', result.text)
-        self.assertEqual(self.messages()['pitch'], None)
+        self.assertEqual(self.messages(), EMPTY)
 
     def test_save_generates_all_four_audios_once_with_agent_voice(self):
         self.product()
         self.assertEqual(self.client.patch('/settings/agent', json={'agent_name': 'Bia', 'tts_voice': 'coral'},
                                            headers=self.headers).status_code, 200)
         spoken = self.spy()
-        result = self.save({'pitch': PITCH, 'goodbye': GOODBYE})
+        result = self.save({'opening': OPENING, 'pitch': PITCH, 'goodbye': GOODBYE})
         self.assertEqual(result.status_code, 200)
-        self.assertEqual(result.json(), {'pitch': PITCH, 'goodbye': GOODBYE, 'ready': True})
-        opening = ('Olá, meu nome é Bia, sou Representante de Produto, gostaria de apresentar para vocês '
-                   'o nosso produto. É com você que posso falar?')
-        self.assertEqual(spoken, [('Alô?', 'coral'), (opening, 'coral'), (PITCH, 'coral'), (GOODBYE, 'coral')])
+        self.assertEqual(result.json(), {'opening': OPENING, 'pitch': PITCH, 'goodbye': GOODBYE, 'ready': True})
+        self.assertEqual(spoken, [('Alô?', 'coral'), (OPENING, 'coral'), (PITCH, 'coral'), (GOODBYE, 'coral')])
         self.assertEqual(self.messages(), result.json())
         # Saving again and dialing reuse the prepared audio: no new synthesis.
-        self.assertEqual(self.save({'pitch': PITCH, 'goodbye': GOODBYE}).status_code, 200)
+        self.assertEqual(self.save({'opening': OPENING, 'pitch': PITCH, 'goodbye': GOODBYE}).status_code, 200)
         self.assertEqual(self.post('/leads', {'name': 'Ana', 'phone': '+5511999999999'}).status_code, 201)
         self.assertEqual(self.post('/calls', {'lead_id': 1, 'product_id': 1}).status_code, 201)
         self.assertEqual(len(spoken), 4)
@@ -80,20 +80,37 @@ class PreparedMessages(unittest.TestCase):
         for body in ({}, {'pitch': PITCH}, {'pitch': '', 'goodbye': GOODBYE}, {'pitch': 'x'*401, 'goodbye': GOODBYE},
                      {'pitch': PITCH, 'goodbye': 'x'*201}, {'pitch': PITCH, 'goodbye': GOODBYE, 'other': 1}):
             self.assertEqual(self.save(body).status_code, 422, body)
-        self.assertEqual(self.save({'pitch': PITCH, 'goodbye': GOODBYE}, id=9).status_code, 404)
-        self.assertEqual(self.client.put('/products/1/messages', json={'pitch': PITCH, 'goodbye': GOODBYE}).status_code, 401)
+        self.assertEqual(self.save({'opening': OPENING, 'pitch': PITCH, 'goodbye': GOODBYE}, id=9).status_code, 404)
+        self.assertEqual(self.client.put('/products/1/messages', json={'opening': OPENING, 'pitch': PITCH, 'goodbye': GOODBYE}).status_code, 401)
         self.assertEqual(spoken, [])
-        self.assertEqual(self.messages()['pitch'], None)
+        self.assertEqual(self.messages(), EMPTY)
 
     def test_voice_change_and_product_edit_invalidate_readiness(self):
         self.product()
-        self.assertEqual(self.save({'pitch': PITCH, 'goodbye': GOODBYE}).status_code, 200)
+        self.assertEqual(self.save({'opening': OPENING, 'pitch': PITCH, 'goodbye': GOODBYE}).status_code, 200)
         self.assertEqual(self.client.patch('/settings/agent', json={'agent_name': 'Pedro', 'tts_voice': 'onyx'},
                                            headers=self.headers).status_code, 200)
-        self.assertEqual(self.messages(), {'pitch': PITCH, 'goodbye': GOODBYE, 'ready': False})
+        self.assertEqual(self.messages(), {'opening': OPENING, 'pitch': PITCH, 'goodbye': GOODBYE, 'ready': False})
         self.assertEqual(self.client.patch('/products/1', json={'description': 'Nova descrição'},
                                            headers=self.headers).status_code, 200)
-        self.assertEqual(self.messages(), {'pitch': None, 'goodbye': None, 'ready': False})
+        self.assertEqual(self.messages(), EMPTY)
+
+    def test_agent_name_change_invalidates_opening_even_with_same_voice(self):
+        self.product()
+        self.assertEqual(self.save({'opening': OPENING, 'pitch': PITCH, 'goodbye': GOODBYE}).status_code, 200)
+        self.assertEqual(self.client.patch('/settings/agent', json={'agent_name': 'Pedro', 'tts_voice': 'alloy'},
+                                           headers=self.headers).status_code, 200)
+        self.assertFalse(self.messages()['ready'])  # The saved opening still says "Bia".
+        self.assertEqual(self.save({'opening': 'Olá, aqui é o Pedro. Falo com o responsável?', 'pitch': PITCH,
+                                    'goodbye': GOODBYE}).status_code, 200)
+        self.assertTrue(self.messages()['ready'])
+
+    def test_dial_speaks_the_reviewed_opening(self):
+        self.product()
+        self.assertEqual(self.save({'opening': OPENING, 'pitch': PITCH, 'goodbye': GOODBYE}).status_code, 200)
+        self.assertEqual(self.post('/leads', {'name': 'Ana', 'phone': '+5511999999999'}).status_code, 201)
+        self.assertEqual(self.post('/calls', {'lead_id': 1, 'product_id': 1}).status_code, 201)
+        self.assertEqual(self.store.opening_intro(1)[0], OPENING)
 
     def test_synthesis_failure_keeps_texts_but_not_ready(self):
         self.product()
@@ -101,9 +118,9 @@ class PreparedMessages(unittest.TestCase):
             if text == GOODBYE: raise RuntimeError('tts offline')
             return b'\xff' * 160
         self.provider.speak = speak
-        result = self.save({'pitch': PITCH, 'goodbye': GOODBYE})
+        result = self.save({'opening': OPENING, 'pitch': PITCH, 'goodbye': GOODBYE})
         self.assertEqual(result.status_code, 503)
-        self.assertEqual(self.messages(), {'pitch': PITCH, 'goodbye': GOODBYE, 'ready': False})
+        self.assertEqual(self.messages(), {'opening': OPENING, 'pitch': PITCH, 'goodbye': GOODBYE, 'ready': False})
 
 
 if __name__ == '__main__': unittest.main()

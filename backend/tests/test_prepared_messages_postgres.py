@@ -17,7 +17,7 @@ class PreparedMessagesPostgreSQL(cases.PreparedMessages):
 
     def test_dial_pins_prepared_pitch_and_goodbye(self):
         self.product()
-        self.assertEqual(self.save({'pitch': cases.PITCH, 'goodbye': cases.GOODBYE}).status_code, 200)
+        self.assertEqual(self.save({'opening': cases.OPENING, 'pitch': cases.PITCH, 'goodbye': cases.GOODBYE}).status_code, 200)
         self.store.migrate()
         self.assertEqual(self.post('/leads', {'name': 'Ana', 'phone': '+5511999999999'}).status_code, 201)
         self.assertEqual(self.post('/calls', {'lead_id': 1, 'product_id': 1}).status_code, 201)

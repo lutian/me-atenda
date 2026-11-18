@@ -36,11 +36,11 @@ Em **Configurações → Agente de voz** o operador escolhe a voz do TTS e o nom
 
 Em **Leads → Disparo unitário**, depois de escolher o produto:
 
-1. **Gerar texto com IA** (`POST /products/{id}/messages/draft`) sugere a apresentação a partir do nome e da descrição do produto. A despedida vem preenchida com "Entendi, obrigado pelo seu tempo.". Nada é salvo nem sintetizado nesse passo.
-2. O operador revisa os dois textos e clica em **Salvar e gerar áudios** (`PUT /products/{id}/messages`, apresentação de 1 a 400 caracteres e despedida de 1 a 200). O backend salva os textos e sintetiza, com a voz do agente, "Alô?", a abertura, a apresentação e a despedida. Áudios que já existem no cache (`opening_audio`) são reaproveitados.
+1. **Gerar texto com IA** (`POST /products/{id}/messages/draft`) sugere a abertura e a apresentação a partir do nome do agente e do nome e da descrição do produto. A despedida vem preenchida com "Entendi, obrigado pelo seu tempo.". Nada é salvo nem sintetizado nesse passo, e os textos também podem ser escritos à mão.
+2. O operador revisa os três textos e clica em **Salvar e gerar áudios** (`PUT /products/{id}/messages`: `opening` e `pitch` de 1 a 400 caracteres, `goodbye` de 1 a 200). O backend salva os textos e sintetiza, com a voz do agente, "Alô?", a abertura, a apresentação e a despedida. Áudios que já existem no cache (`opening_audio`) são reaproveitados; o "Alô?" é um só por voz, compartilhado por todos os produtos.
 3. **Iniciar UMA ligação** só fica habilitado quando `GET /products/{id}/messages` responde `ready: true`.
 
-Trocar a voz ou o nome do agente faz `ready` voltar a `false`, porque os áudios são indexados por texto e voz. Editar o produto apaga os textos, que precisam ser revisados de novo. Se a síntese falhar, os textos ficam salvos, `ready` continua `false` e vale a regra de reconciliação manual do cache. A API ainda aceita discar sem mensagens preparadas, para manter o contrato de `POST /calls`; nesse caso a chamada não tem apresentação nem despedida prontas.
+Trocar a voz faz `ready` voltar a `false`, porque os áudios são indexados por texto e voz. Trocar o nome também, porque a abertura revisada cita o nome salvo junto com ela. Editar o produto apaga os textos, que precisam ser revisados de novo. Se a síntese falhar, os textos ficam salvos, `ready` continua `false` e vale a regra de reconciliação manual do cache. A API ainda aceita discar sem mensagens preparadas, para manter o contrato de `POST /calls`. Nesse caso a chamada usa a abertura padrão ("Olá, meu nome é {agente}, sou Representante de {produto}, …") e não tem apresentação nem despedida prontas.
 
 ## Respostas curtas e mensagens preparadas na conversa
 

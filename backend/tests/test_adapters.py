@@ -111,18 +111,23 @@ class Adapters(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ValueError, '^invalid structured outcome$'):
             await p.answer([], 'C', 'Bia', [])
 
-    async def test_draft_returns_trimmed_pitch_and_rejects_invalid_output(self):
+    async def test_draft_returns_trimmed_opening_and_pitch_and_rejects_invalid_output(self):
         p = Providers(Settings())
         create = AsyncMock(return_value=NS(usage=None, choices=[NS(message=NS(
-            content='{"pitch":"  Integramos cartórios. Você cuida disso?  "}'))]))
+            content='{"opening":" Olá, aqui é o Pedro, da Cartória. Falo com o responsável? ",'
+                    '"pitch":"  Integramos cartórios. Você cuida disso?  "}'))]))
         p._openai = NS(chat=NS(completions=NS(create=create)))
-        self.assertEqual(await p.draft('Cartória', 'Integração', 'Pedro'), 'Integramos cartórios. Você cuida disso?')
+        self.assertEqual(await p.draft('Cartória', 'Integração', 'Pedro'),
+                         {'opening': 'Olá, aqui é o Pedro, da Cartória. Falo com o responsável?',
+                          'pitch': 'Integramos cartórios. Você cuida disso?'})
         messages = create.await_args.kwargs['messages']
         self.assertIn('se chama Pedro', messages[0]['content'])
+        self.assertIn('"opening"', messages[0]['content'])
         self.assertEqual(messages[1], {'role': 'user', 'content': 'Produto: Cartória\nDescrição: Integração'})
-        for content in ('{"pitch":""}', '{"pitch":null}', '{"other":"x"}', '{"pitch":"%s"}' % ('x'*401)):
+        for content in ('{"opening":"Olá","pitch":""}', '{"opening":"","pitch":"P"}', '{"pitch":"P"}',
+                        '{"opening":"Olá","pitch":null}', '{"opening":"%s","pitch":"P"}' % ('x'*401)):
             create.return_value = NS(usage=None, choices=[NS(message=NS(content=content))])
-            with self.assertRaisesRegex(ValueError, '^invalid pitch draft$'): await p.draft('C', 'D', 'Bia')
+            with self.assertRaisesRegex(ValueError, '^invalid draft$'): await p.draft('C', 'D', 'Bia')
 
     async def test_local_inference_does_not_run_on_event_loop(self):
         p = Providers(Settings())

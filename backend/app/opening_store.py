@@ -56,17 +56,20 @@ class OpeningStore:
         with self.connection() as db:
             if not db.execute('SELECT id FROM products WHERE id=%s', (product_id,)).fetchone():
                 raise LookupError('not found')
-            row = db.execute('SELECT pitch,goodbye FROM product_messages WHERE product_id=%s',
+            row = db.execute('SELECT opening,pitch,goodbye,agent_name FROM product_messages WHERE product_id=%s',
                              (product_id,)).fetchone()
-            return row or {'pitch': None, 'goodbye': None}
+            return row or {'opening': None, 'pitch': None, 'goodbye': None, 'agent_name': None}
 
-    def save_product_messages(self, product_id, pitch, goodbye):
+    def save_product_messages(self, product_id, opening, pitch, goodbye, agent_name):
         from psycopg.errors import ForeignKeyViolation
         try:
             with self.connection() as db:
-                return db.execute('INSERT INTO product_messages(product_id,pitch,goodbye) VALUES (%s,%s,%s) '
-                                  'ON CONFLICT (product_id) DO UPDATE SET pitch=EXCLUDED.pitch,goodbye=EXCLUDED.goodbye '
-                                  'RETURNING pitch,goodbye', (product_id, pitch, goodbye)).fetchone()
+                return db.execute(
+                    'INSERT INTO product_messages(product_id,opening,pitch,goodbye,agent_name) VALUES (%s,%s,%s,%s,%s) '
+                    'ON CONFLICT (product_id) DO UPDATE SET opening=EXCLUDED.opening,pitch=EXCLUDED.pitch,'
+                    'goodbye=EXCLUDED.goodbye,agent_name=EXCLUDED.agent_name '
+                    'RETURNING opening,pitch,goodbye,agent_name',
+                    (product_id, opening, pitch, goodbye, agent_name)).fetchone()
         except ForeignKeyViolation as exc: raise LookupError('not found') from exc
 
     def openings_ready(self, digests):

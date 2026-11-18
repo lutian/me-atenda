@@ -21,7 +21,7 @@ class ScriptedReply(unittest.TestCase):
         self.assertEqual(self.post('/products', {'name': 'Produto', 'description': 'D'}).status_code, 201)
         self.assertEqual(self.post('/leads', {'name': 'Ana', 'phone': '+5511999999999'}).status_code, 201)
         if prepared:
-            self.assertEqual(self.client.put('/products/1/messages', json={'pitch': PITCH, 'goodbye': GOODBYE},
+            self.assertEqual(self.client.put('/products/1/messages', json={'opening': 'Olá, aqui é a Bia. Posso falar com você?', 'pitch': PITCH, 'goodbye': GOODBYE},
                                              headers=self.headers).status_code, 200)
         self.assertEqual(self.post('/calls', {'lead_id': 1, 'product_id': 1}).status_code, 201)
         spoken, offered = [], []

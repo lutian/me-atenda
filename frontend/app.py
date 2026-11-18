@@ -80,19 +80,23 @@ def prepared_messages(product_id):
     """Review the drafted pitch and goodbye, then generate every prepared audio before dialing."""
     st.markdown("**Mensagens preparadas**")
     st.caption("Alô, abertura, apresentação (se houver interesse) e despedida (sem interesse ou contato errado) "
-               "ficam gravadas antes da ligação, sem esperar o TTS durante a conversa.")
+               "ficam gravadas antes da ligação, sem esperar o TTS durante a conversa. O \"Alô?\" é único e "
+               "compartilhado por todos os produtos.")
     status = api.product_messages(product_id)
-    pitch_key, goodbye_key = f"pitch-{product_id}", f"goodbye-{product_id}"
+    opening_key, pitch_key, goodbye_key = f"opening-{product_id}", f"pitch-{product_id}", f"goodbye-{product_id}"
+    st.session_state.setdefault(opening_key, status["opening"] or "")
     st.session_state.setdefault(pitch_key, status["pitch"] or "")
     st.session_state.setdefault(goodbye_key, status["goodbye"] or GOODBYE)
     if st.button("Gerar texto com IA", key=f"draft-{product_id}"):
         draft = api.draft_messages(product_id)
-        st.session_state[pitch_key], st.session_state[goodbye_key] = draft["pitch"], draft["goodbye"]
+        st.session_state[opening_key], st.session_state[pitch_key] = draft["opening"], draft["pitch"]
+        st.session_state[goodbye_key] = draft["goodbye"]
         st.rerun()
+    opening = st.text_area("Abertura (após o \"Alô?\"; inclui o nome do agente)", key=opening_key, max_chars=400)
     pitch = st.text_area("Apresentação (caso a pessoa tenha interesse)", key=pitch_key, max_chars=400)
     goodbye = st.text_area("Despedida (sem interesse ou contato errado)", key=goodbye_key, max_chars=200)
     if st.button("Salvar e gerar áudios", key=f"prepare-{product_id}"):
-        try: api.save_messages(product_id, pitch, goodbye)
+        try: api.save_messages(product_id, opening, pitch, goodbye)
         except ValueError as exc:
             st.error(str(exc))
             return False

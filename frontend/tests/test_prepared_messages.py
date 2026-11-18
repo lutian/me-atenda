@@ -13,14 +13,16 @@ from client import APIClient, APIError
 
 PITCH = 'Integramos cartórios. Você cuida da parte técnica?'
 GOODBYE = 'Entendi, obrigado pelo seu tempo.'
+OPENING = 'Olá, aqui é a Bia, da Cartória. Falo com o responsável técnico?'
 
 
 class ClientMessages(unittest.TestCase):
     def test_fixed_paths_payloads_and_local_validation(self):
         calls = []
         api = APIClient('http://synthetic.local', 'synthetic-key')
-        bodies = [{'pitch': None, 'goodbye': None, 'ready': False}, {'pitch': PITCH, 'goodbye': GOODBYE},
-                  {'pitch': PITCH, 'goodbye': GOODBYE, 'ready': True}]
+        bodies = [{'opening': None, 'pitch': None, 'goodbye': None, 'ready': False},
+                  {'opening': OPENING, 'pitch': PITCH, 'goodbye': GOODBYE},
+                  {'opening': OPENING, 'pitch': PITCH, 'goodbye': GOODBYE, 'ready': True}]
         @contextmanager
         def response(request, timeout):
             calls.append((request, timeout))
@@ -31,15 +33,17 @@ class ClientMessages(unittest.TestCase):
         api._http.open = response
         self.assertEqual(api.product_messages(2), bodies[0])
         self.assertEqual(api.draft_messages(2), bodies[1])
-        self.assertEqual(api.save_messages(2, f' {PITCH} ', GOODBYE), bodies[2])
+        self.assertEqual(api.save_messages(2, OPENING, f' {PITCH} ', GOODBYE), bodies[2])
         self.assertEqual([(r.method, r.full_url) for r, _ in calls],
                          [('GET', 'http://synthetic.local/products/2/messages'),
                           ('POST', 'http://synthetic.local/products/2/messages/draft'),
                           ('PUT', 'http://synthetic.local/products/2/messages')])
-        self.assertEqual(json.loads(calls[2][0].data), {'pitch': PITCH, 'goodbye': GOODBYE})
+        self.assertEqual(json.loads(calls[2][0].data), {'opening': OPENING, 'pitch': PITCH, 'goodbye': GOODBYE})
         self.assertGreaterEqual(calls[2][1], 60)  # Four syntheses can exceed the default timeout.
-        for pitch, goodbye in (('', GOODBYE), ('x'*401, GOODBYE), (PITCH, ''), (PITCH, 'x'*201), (None, GOODBYE)):
-            with self.assertRaises(ValueError): api.save_messages(2, pitch, goodbye)
+        for opening, pitch, goodbye in (('', PITCH, GOODBYE), ('x'*401, PITCH, GOODBYE), (None, PITCH, GOODBYE),
+                                        (OPENING, '', GOODBYE), (OPENING, 'x'*401, GOODBYE), (OPENING, PITCH, ''),
+                                        (OPENING, PITCH, 'x'*201), (OPENING, None, GOODBYE)):
+            with self.assertRaises(ValueError): api.save_messages(2, opening, pitch, goodbye)
         with self.assertRaises(ValueError): api.product_messages(None)
         self.assertEqual(len(calls), 3)
 
@@ -48,7 +52,7 @@ class ClientMessages(unittest.TestCase):
         @contextmanager
         def response(request, timeout):
             class Result:
-                def read(self): return b'{"pitch":"x","goodbye":"y"}'
+                def read(self): return b'{"opening":"o","pitch":"x","goodbye":"y"}'
             yield Result()
         api._http.open = response
         with self.assertRaises(APIError): api.product_messages(1)
@@ -56,7 +60,7 @@ class ClientMessages(unittest.TestCase):
 
 class FakeAPI:
     def __init__(self):
-        self.status = {'pitch': None, 'goodbye': None, 'ready': False}
+        self.status = {'opening': None, 'pitch': None, 'goodbye': None, 'ready': False}
         self.saved = []; self.dispatched = []; self.drafts = 0
     def list(self, resource):
         if resource == 'leads': return [{'id': 1, 'name': 'Ana', 'phone': '+5511999999999', 'company': ''}]
@@ -65,10 +69,10 @@ class FakeAPI:
     def product_messages(self, id): return dict(self.status)
     def draft_messages(self, id):
         self.drafts += 1
-        return {'pitch': PITCH, 'goodbye': GOODBYE}
-    def save_messages(self, id, pitch, goodbye):
-        self.saved.append((id, pitch, goodbye))
-        self.status = {'pitch': pitch, 'goodbye': goodbye, 'ready': True}
+        return {'opening': OPENING, 'pitch': PITCH, 'goodbye': GOODBYE}
+    def save_messages(self, id, opening, pitch, goodbye):
+        self.saved.append((id, opening, pitch, goodbye))
+        self.status = {'opening': opening, 'pitch': pitch, 'goodbye': goodbye, 'ready': True}
         return dict(self.status)
     def dispatch(self, lead_id, product_id):
         self.dispatched.append((lead_id, product_id)); return {'id': 1}
@@ -96,14 +100,16 @@ class DispatchUI(unittest.TestCase):
         self.assertTrue(self.call_button().disabled)
         self.app.button(key='draft-1').click().run()
         self.assertEqual(self.api.drafts, 1)
+        self.assertEqual(self.app.text_area(key='opening-1').value, OPENING)
         self.assertEqual(self.app.text_area(key='pitch-1').value, PITCH)
         self.assertEqual(self.app.text_area(key='goodbye-1').value, GOODBYE)
         self.assertEqual(self.api.saved, [])  # Draft is never saved without confirmation.
         self.assertTrue(self.call_button().disabled)
+        self.app.text_area(key='opening-1').set_value('Abertura revisada?')
         self.app.text_area(key='pitch-1').set_value('Pitch revisado?').run()
         self.app.button(key='prepare-1').click().run()
         self.assertFalse(self.app.exception)
-        self.assertEqual(self.api.saved, [(1, 'Pitch revisado?', GOODBYE)])
+        self.assertEqual(self.api.saved, [(1, 'Abertura revisada?', 'Pitch revisado?', GOODBYE)])
         self.assertTrue(self.app.success)
         # The rerun after saving asks for consent again before the real call.
         self.app.checkbox[0].check().run()
@@ -112,6 +118,7 @@ class DispatchUI(unittest.TestCase):
         self.assertEqual(self.api.dispatched, [(1, 1)])
 
     def test_saved_messages_are_loaded_and_goodbye_defaults(self):
+        self.assertEqual(self.app.text_area(key='opening-1').value, '')
         self.assertEqual(self.app.text_area(key='pitch-1').value, '')
         self.assertEqual(self.app.text_area(key='goodbye-1').value, GOODBYE)
 

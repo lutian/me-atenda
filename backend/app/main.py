@@ -50,6 +50,7 @@ class CallPolicy(BaseModel):
 
 class Messages(BaseModel):
     model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
+    opening: str = Field(min_length=1, max_length=400)
     pitch: str = Field(min_length=1, max_length=400)
     goodbye: str = Field(min_length=1, max_length=200)
 
@@ -168,14 +169,15 @@ def create_app(settings=None, store=None, providers=None):
     async def draft_messages(id: int):
         product = await run('get', 'products', id)
         profile = await run('agent_profile')
-        try: pitch = await provider.draft(product['name'], product['description'], profile['agent_name'])
-        except Exception: raise HTTPException(503, 'Draft unavailable; write the pitch manually or retry')
-        return {'pitch': pitch, 'goodbye': GOODBYE}
+        try: draft = await provider.draft(product['name'], product['description'], profile['agent_name'])
+        except Exception: raise HTTPException(503, 'Draft unavailable; write the texts manually or retry')
+        return {'opening': draft['opening'], 'pitch': draft['pitch'], 'goodbye': GOODBYE}
 
     @app.put('/products/{id}/messages', dependencies=[Depends(admin)])
     async def save_messages(id: int, data: Messages):
         try:
-            await prepare_messages(db, provider, s, id, data.pitch, data.goodbye, isinstance(provider, Providers))
+            await prepare_messages(db, provider, s, id, data.opening, data.pitch, data.goodbye,
+                                   isinstance(provider, Providers))
         except LookupError: raise HTTPException(404, 'Not found')
         except ValueError as exc: raise HTTPException(409, str(exc))
         except Exception:

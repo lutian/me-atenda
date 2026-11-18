@@ -9,6 +9,9 @@ class NoRedirect(HTTPRedirectHandler):
         return None
 
 
+MESSAGE_FIELDS = ('opening', 'pitch', 'goodbye')
+
+
 class APIError(Exception):
     """Safe operator-facing error, without upstream bodies or credentials."""
 
@@ -93,10 +96,10 @@ class APIClient:
     @staticmethod
     def _messages(data, status=True):
         valid = isinstance(data, dict) and all(
-            data.get(k) is None or isinstance(data.get(k), str) for k in ('pitch', 'goodbye'))
+            k in data and (data[k] is None or isinstance(data[k], str)) for k in MESSAGE_FIELDS)
         if valid and status: valid = type(data.get('ready')) is bool
         if not valid: raise APIError('Backend returned invalid prepared messages.')
-        return {k: data[k] for k in (('pitch', 'goodbye', 'ready') if status else ('pitch', 'goodbye'))}
+        return {k: data[k] for k in MESSAGE_FIELDS + (('ready',) if status else ())}
 
     def product_messages(self, product_id):
         return self._messages(self._request('GET', f'/products/{self._id(product_id)}/messages'))
@@ -104,15 +107,18 @@ class APIClient:
     def draft_messages(self, product_id):
         return self._messages(self._request('POST', f'/products/{self._id(product_id)}/messages/draft'), False)
 
-    def save_messages(self, product_id, pitch, goodbye):
+    def save_messages(self, product_id, opening, pitch, goodbye):
         product_id = self._id(product_id)
+        if not isinstance(opening, str) or not 1 <= len(opening.strip()) <= 400:
+            raise ValueError('Opening must have 1 to 400 characters.')
         if not isinstance(pitch, str) or not 1 <= len(pitch.strip()) <= 400:
             raise ValueError('Pitch must have 1 to 400 characters.')
         if not isinstance(goodbye, str) or not 1 <= len(goodbye.strip()) <= 200:
             raise ValueError('Goodbye must have 1 to 200 characters.')
         # Up to four speech syntheses run in this request.
         return self._messages(self._request('PUT', f'/products/{product_id}/messages',
-                                            {'pitch': pitch.strip(), 'goodbye': goodbye.strip()}, timeout=90))
+                                            {'opening': opening.strip(), 'pitch': pitch.strip(),
+                                             'goodbye': goodbye.strip()}, timeout=90))
 
     def list(self, resource):
         return self._request("GET", "/" + self._resource(resource))

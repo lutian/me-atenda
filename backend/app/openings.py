@@ -18,7 +18,9 @@ def identity(text, settings, voice=None):
 
 def scripted_texts(product, profile, messages):
     """Hello, opening and (when confirmed) pitch/goodbye, in that fixed order."""
-    texts = [HELLO, NOTICE.format(agent_name=profile['agent_name'], product_name=product['name'])]
+    # Reviewed opening when saved; the built-in template keeps calls without one working.
+    opening = messages.get('opening') or NOTICE.format(agent_name=profile['agent_name'], product_name=product['name'])
+    texts = [HELLO, opening]
     if messages['pitch']: texts += [messages['pitch'], messages['goodbye']]
     return texts
 
@@ -40,14 +42,14 @@ async def synthesize(run, provider, settings, texts, voice, ledger, stop):
     return keys
 
 
-async def prepare_messages(db, provider, settings, product_id, pitch, goodbye, ledger):
+async def prepare_messages(db, provider, settings, product_id, opening, pitch, goodbye, ledger):
     """Operator button: persist confirmed texts, then synthesize every prepared message."""
     async def run(name, *args): return await asyncio.to_thread(getattr(db, name), *args)
     product = await run('get', 'products', product_id)
     guard = await run('preparation_guard')
     try:
-        messages = await run('save_product_messages', product_id, pitch, goodbye)
         profile = dict(await run('agent_profile'))
+        messages = await run('save_product_messages', product_id, opening, pitch, goodbye, profile['agent_name'])
         texts = scripted_texts(product, profile, messages)
         await synthesize(run, provider, settings, texts, voice_of(profile, settings), ledger, asyncio.Event())
     finally: await asyncio.to_thread(guard.close)
@@ -57,13 +59,15 @@ async def messages_status(db, settings, product_id):
     async def run(name, *args): return await asyncio.to_thread(getattr(db, name), *args)
     messages = dict(await run('product_messages', product_id))
     ready = False
-    if messages['pitch']:
+    profile = dict(await run('agent_profile'))
+    # The opening names the agent: a renamed agent needs a reviewed opening again.
+    if messages['opening'] and messages['pitch'] and messages['agent_name'] == profile['agent_name']:
         product = await run('get', 'products', product_id)
-        profile = dict(await run('agent_profile'))
         voice = voice_of(profile, settings)
         keys = [identity(text, settings, voice) for text in scripted_texts(product, profile, messages)]
         ready = await run('openings_ready', keys)
-    return {'pitch': messages['pitch'], 'goodbye': messages['goodbye'], 'ready': ready}
+    return {'opening': messages['opening'], 'pitch': messages['pitch'], 'goodbye': messages['goodbye'],
+            'ready': ready}
 
 
 async def prepare(db, provider, settings, lead_id, product_id, prices, stop, ledger):
