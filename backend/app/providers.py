@@ -49,6 +49,9 @@ class Providers:
 
     @instrument('dial', 'twilio')
     async def dial(self, call, phone):
+        limit = call.get('max_duration_seconds')
+        if type(limit) is not int or not 1 <= limit <= 14400:
+            raise ValueError('Invalid call duration snapshot')
         base = self.s.public_base
         async with self.client() as client:
             response = await client.post(self.twilio_url('Calls.json'), data={
@@ -61,7 +64,7 @@ class Providers:
                 'StatusCallbackMethod': 'POST', 'StatusCallbackEvent': 'completed',
                 'Record': 'true', 'RecordingStatusCallback': f'{base}/twilio/recording/{call["id"]}',
                 'RecordingStatusCallbackMethod': 'POST', 'RecordingStatusCallbackEvent': 'completed absent',
-                'TimeLimit': '600', 'Timeout': '30'})
+                'TimeLimit': str(limit), 'Timeout': '30'})
             if 400 <= response.status_code < 500 and response.status_code != 408:
                 try: error = response.json()
                 except ValueError: error = None

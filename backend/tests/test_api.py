@@ -22,6 +22,7 @@ class MemoryStore:
         self.snapshots = {}
         self.openings = {}; self.pins = {}; self.preparing = threading.Lock()
         self.answering = {}; self.answer_lock = threading.Lock()
+        self.max_duration_seconds = 180
     def preparation_guard(self):
         if not self.preparing.acquire(blocking=False): raise ValueError('Speech preparation busy')
         return SimpleNamespace(close=self.preparing.release)
@@ -89,6 +90,10 @@ class MemoryStore:
     def delete(self, table, id):
         self.get(table, id)
         del getattr(self, table)[id]
+    def call_policy(self): return {'max_duration_seconds':self.max_duration_seconds}
+    def save_call_policy(self, seconds):
+        self.max_duration_seconds = seconds
+        return self.call_policy()
     def reserve(self, lead_id, product_id, opening=None):
         self.get('leads', lead_id); product = self.get('products', product_id)
         if opening and opening[0] != product['name']: raise ValueError('Spoken product changed')
@@ -96,7 +101,8 @@ class MemoryStore:
         id = len(self.calls) + 1
         self.calls[id] = dict(id=id, lead_id=lead_id, product_id=product_id,
             status_final='ligando', active=True, human=False, sid=None, stream_sid=None,
-            duration_seconds=0, recording_status='pending', transcription_json=[], audio=None)
+            duration_seconds=0, recording_status='pending', transcription_json=[], audio=None,
+            max_duration_seconds=self.max_duration_seconds)
         if opening: self.pins[id] = opening
         return dict(self.calls[id])
     def audio(self, id): return self.calls[id]['audio']

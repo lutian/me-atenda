@@ -104,7 +104,10 @@ class ObservabilityPostgreSQL(fixtures.PostgreSQL):
             db.execute((Path(__file__).parent.parent/'migrations/001_initial.sql').read_text())
         self.store.product({'name':'Existing','description':'Unchanged'}, [])
         self.store.lead({'name':'Existing','phone':'+15551234567','company':''})
-        call = self.store.reserve(1,1)
+        # Seed genuine pre-policy history using the old schema, not new reserve().
+        with self.store.connection() as db:
+            call = db.execute('INSERT INTO calls(lead_id,product_id) VALUES(1,1) RETURNING *').fetchone()
+            db.execute("UPDATE leads SET status='ligando' WHERE id=1")
         self.store.append(call['id'], 'user', 'Existing history')
         self.store.recording(call['id'], 'RE'+'4'*32, b'RIFFexisting')
         self.store.migrate()

@@ -43,6 +43,11 @@ class LeadPatch(BaseModel):
     company: Optional[str] = Field(default=None, max_length=200)
 
 
+class CallPolicy(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    max_duration_seconds: int = Field(strict=True, ge=1, le=14400)
+
+
 class Dial(BaseModel):
     model_config = ConfigDict(extra='forbid')
     lead_id: int = Field(gt=0)
@@ -95,6 +100,13 @@ def create_app(settings=None, store=None, providers=None):
             await run('health')
             return {'status': 'ok'}
         except Exception: raise HTTPException(503, 'Database unavailable or migrations missing')
+
+    @app.get('/settings/calls', dependencies=[Depends(admin)])
+    async def call_policy(): return await run('call_policy')
+
+    @app.patch('/settings/calls', dependencies=[Depends(admin)])
+    async def save_call_policy(data: CallPolicy):
+        return await run('save_call_policy', data.max_duration_seconds)
 
     @app.get('/products', dependencies=[Depends(admin)])
     async def products(): return await run('list', 'products')

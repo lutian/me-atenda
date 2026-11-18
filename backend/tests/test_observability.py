@@ -99,17 +99,17 @@ class Instrumentation(unittest.IsolatedAsyncioTestCase):
         p.client = lambda: httpx.AsyncClient(transport=httpx.MockTransport(
             lambda request: httpx.Response(201,json={'sid':'CA'+'1'*32})))
         with self.assertLogs('app.observability', level='ERROR') as logs:
-            self.assertEqual(await p.dial({'id':7}, '+15551234567'), 'CA'+'1'*32)
+            self.assertEqual(await p.dial({'id':7,'max_duration_seconds':180}, '+15551234567'), 'CA'+'1'*32)
         self.assertIn('accounting_finalize_failed event_id=1', logs.output[0])
         self.assertNotIn('private', str(logs.output))
         self.assertEqual(self.ledger.rows[0]['error_code'], 'interrupted')
         p.client = lambda: httpx.AsyncClient(transport=httpx.MockTransport(
             lambda request: httpx.Response(400,json={'status':400,'code':21211})))
         with self.assertLogs('app.observability', level='ERROR'), self.assertRaises(CallCreationRejected):
-            await p.dial({'id':8}, '+15551234567')
+            await p.dial({'id':8,'max_duration_seconds':180}, '+15551234567')
         before = len(self.ledger.rows)
         self.ledger.event_start = lambda event: (_ for _ in ()).throw(OSError('private'))
-        with self.assertRaises(OSError): await p.dial({'id':9}, '+15551234567')
+        with self.assertRaises(OSError): await p.dial({'id':9,'max_duration_seconds':180}, '+15551234567')
         self.assertEqual(len(self.ledger.rows), before)
 
     async def test_fixed_billing_resource_sid_and_currency_validation(self):
@@ -144,7 +144,7 @@ class Instrumentation(unittest.IsolatedAsyncioTestCase):
             return httpx.Response(201, json={'sid':'CA'+'1'*32})
         p.client = lambda: httpx.AsyncClient(transport=httpx.MockTransport(handler))
         with call_scope(9):
-            self.assertEqual(await p.dial({'id':9}, '+15551234567'), 'CA'+'1'*32)
+            self.assertEqual(await p.dial({'id':9,'max_duration_seconds':180}, '+15551234567'), 'CA'+'1'*32)
             await p.hangup('CA'+'1'*32)
             self.assertEqual(await p.download('RE'+'4'*32), b'RIFFvalid')
         self.assertEqual([e['operation'] for e in self.ledger.rows], ['dial','hangup','download'])

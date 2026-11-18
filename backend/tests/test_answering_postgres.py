@@ -123,7 +123,11 @@ class AnsweringPostgreSQL(unittest.TestCase):
                 db.execute((Path(__file__).parent.parent/'migrations'/name).read_text())
         self.store.product({'name':'Existing','description':'Existing'}, [])
         self.store.lead({'name':'Existing','phone':'+15551234567','company':''})
-        self.store.reserve(1,1); self.store.append(1,'user','Existing history')
+        # New reserve() requires the new policy; this fixture is deliberately old.
+        with self.store.connection() as db:
+            db.execute('INSERT INTO calls(lead_id,product_id) VALUES(1,1)')
+            db.execute("UPDATE leads SET status='ligando' WHERE id=1")
+        self.store.append(1,'user','Existing history')
         self.store.recording(1,'RE'+'4'*32,b'RIFFexisting')
         self.store.outcome(1,'sucesso')
         before = self.client.get('/calls', headers=self.headers).json()

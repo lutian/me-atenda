@@ -49,7 +49,7 @@ class Adapters(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(form['RecordingStatusCallback'], ['https://voice.example/prefix/twilio/recording/7'])
             return httpx.Response(201, json={'sid': 'CA'+'1'*32})
         p = self.provider(transport)
-        self.assertEqual(await p.dial({'id': 7}, '+15557654321'), 'CA'+'1'*32)
+        self.assertEqual(await p.dial({'id': 7, 'max_duration_seconds': 180}, '+15557654321'), 'CA'+'1'*32)
 
     async def test_answer_bia_prompt_preserves_instructions_history_and_validation(self):
         p = Providers(Settings())

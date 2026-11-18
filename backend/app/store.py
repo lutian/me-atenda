@@ -104,6 +104,21 @@ class Store(AnsweringStore, OpeningStore, AccountingStore):
                     raise LookupError('not found')
         except ForeignKeyViolation as exc: raise ValueError('record has call history') from exc
 
+    def call_policy(self):
+        with self.connection() as db:
+            row = db.execute('SELECT max_duration_seconds FROM call_policy WHERE id=TRUE').fetchone()
+            if not row: raise RuntimeError('Call policy missing')
+            return row
+
+    def save_call_policy(self, seconds):
+        if type(seconds) is not int or not 1 <= seconds <= 14400:
+            raise ValueError('Invalid maximum call duration')
+        with self.connection() as db:
+            row = db.execute('UPDATE call_policy SET max_duration_seconds=%s WHERE id=TRUE '
+                             'RETURNING max_duration_seconds', (seconds,)).fetchone()
+            if not row: raise RuntimeError('Call policy missing')
+            return row
+
     def reserve(self, lead_id, product_id, opening=None):
         from psycopg.errors import UniqueViolation, ForeignKeyViolation
         try:
@@ -113,8 +128,11 @@ class Store(AnsweringStore, OpeningStore, AccountingStore):
                     lead = db.execute('SELECT id FROM leads WHERE id=%s FOR UPDATE', (lead_id,)).fetchone()
                     if not product or not lead: raise LookupError('not found')
                     if product['name'] != opening[0]: raise ValueError('Spoken product changed; dial not attempted')
-                row = db.execute('INSERT INTO calls(lead_id,product_id) VALUES (%s,%s) RETURNING *',
-                                 (lead_id, product_id)).fetchone()
+                policy = db.execute('SELECT max_duration_seconds FROM call_policy WHERE id=TRUE FOR SHARE').fetchone()
+                if not policy: raise RuntimeError('Call policy missing')
+                row = db.execute('INSERT INTO calls(lead_id,product_id,max_duration_seconds) '
+                                 'VALUES (%s,%s,%s) RETURNING *',
+                                 (lead_id, product_id, policy['max_duration_seconds'])).fetchone()
                 db.execute("UPDATE leads SET status='ligando' WHERE id=%s", (lead_id,))
                 if opening:
                     db.execute('INSERT INTO call_openings(call_id,hello,intro) VALUES (%s,%s,%s)',

@@ -139,7 +139,9 @@ async def session(ws, id, store, providers):
         worker = asyncio.create_task(conversation())
         ended = asyncio.create_task(done.wait())
         last_sequence = 0
-        deadline = asyncio.get_running_loop().time() + 300
+        # Carrier TimeLimit is authoritative; this stream safeguard must not
+        # silently cap a larger configured snapshot at the old five minutes.
+        deadline = asyncio.get_running_loop().time() + (bound.get('max_duration_seconds') or 300)
         while not done.is_set():
             if asyncio.get_running_loop().time() >= deadline: raise TimeoutError('session timeout')
             receive = asyncio.create_task(ws.receive_text())
