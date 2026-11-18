@@ -74,6 +74,8 @@ class Store(AnsweringStore, OpeningStore, AccountingStore):
                                  (data['name'], data['description'], id)).fetchone()
                 if not row: raise LookupError('not found')
                 db.execute('DELETE FROM product_chunks WHERE product_id=%s', (id,))
+                # The pitch was drafted from the old product text; force a reviewed regeneration.
+                db.execute('DELETE FROM product_messages WHERE product_id=%s', (id,))
             for text, vector in chunks:
                 db.execute('INSERT INTO product_chunks(product_id,content,embedding) VALUES (%s,%s,%s::vector)',
                            (row['id'], text, self.vector(vector)))
@@ -154,8 +156,9 @@ class Store(AnsweringStore, OpeningStore, AccountingStore):
                                   policy['agent_name'], policy['tts_voice'])).fetchone()
                 db.execute("UPDATE leads SET status='ligando' WHERE id=%s", (lead_id,))
                 if opening:
-                    db.execute('INSERT INTO call_openings(call_id,hello,intro) VALUES (%s,%s,%s)',
-                               (row['id'], opening[1], opening[2]))
+                    scripts = tuple(opening[3:5]) if len(opening) >= 5 else (None, None)
+                    db.execute('INSERT INTO call_openings(call_id,hello,intro,pitch,goodbye) VALUES (%s,%s,%s,%s,%s)',
+                               (row['id'], opening[1], opening[2], *scripts))
                 return row
         except UniqueViolation as exc: raise ValueError('another call is active') from exc
         except ForeignKeyViolation as exc: raise LookupError('lead or product not found') from exc

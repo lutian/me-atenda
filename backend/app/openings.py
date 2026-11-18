@@ -6,6 +6,7 @@ import json
 NOTICE = ('Olá, meu nome é {agent_name}, sou Representante de {product_name}, gostaria de apresentar '
           'para vocês o nosso produto. É com você que posso falar?')
 HELLO = 'Alô?'
+GOODBYE = 'Entendi, obrigado pelo seu tempo.'
 FORMAT = 'raw-mulaw-8000-mono-v1'
 PREP_SECONDS = 20
 
@@ -15,6 +16,56 @@ def identity(text, settings, voice=None):
                                     ensure_ascii=False).encode()).hexdigest()
 
 
+def scripted_texts(product, profile, messages):
+    """Hello, opening and (when confirmed) pitch/goodbye, in that fixed order."""
+    texts = [HELLO, NOTICE.format(agent_name=profile['agent_name'], product_name=product['name'])]
+    if messages['pitch']: texts += [messages['pitch'], messages['goodbye']]
+    return texts
+
+
+def voice_of(profile, settings): return profile['tts_voice'] or settings.tts_voice
+
+
+async def synthesize(run, provider, settings, texts, voice, ledger, stop):
+    keys = [identity(text, settings, voice) for text in texts]
+    for key, text in zip(keys, texts):
+        if stop.is_set(): raise RuntimeError('Preparation interrupted')
+        audio = await run('opening_begin', key, text, settings.tts_model, voice, FORMAT)
+        if audio is None:
+            # Marker is durable BEFORE any external synthesis. No implicit retry on failure.
+            try:
+                audio = await provider.speak(text, voice)
+                await run('opening_save', key, audio, ledger)
+            except Exception: raise RuntimeError('Speech preparation unavailable') from None
+    return keys
+
+
+async def prepare_messages(db, provider, settings, product_id, pitch, goodbye, ledger):
+    """Operator button: persist confirmed texts, then synthesize every prepared message."""
+    async def run(name, *args): return await asyncio.to_thread(getattr(db, name), *args)
+    product = await run('get', 'products', product_id)
+    guard = await run('preparation_guard')
+    try:
+        messages = await run('save_product_messages', product_id, pitch, goodbye)
+        profile = dict(await run('agent_profile'))
+        texts = scripted_texts(product, profile, messages)
+        await synthesize(run, provider, settings, texts, voice_of(profile, settings), ledger, asyncio.Event())
+    finally: await asyncio.to_thread(guard.close)
+
+
+async def messages_status(db, settings, product_id):
+    async def run(name, *args): return await asyncio.to_thread(getattr(db, name), *args)
+    messages = dict(await run('product_messages', product_id))
+    ready = False
+    if messages['pitch']:
+        product = await run('get', 'products', product_id)
+        profile = dict(await run('agent_profile'))
+        voice = voice_of(profile, settings)
+        keys = [identity(text, settings, voice) for text in scripted_texts(product, profile, messages)]
+        ready = await run('openings_ready', keys)
+    return {'pitch': messages['pitch'], 'goodbye': messages['goodbye'], 'ready': ready}
+
+
 async def prepare(db, provider, settings, lead_id, product_id, prices, stop, ledger):
     async def run(name, *args): return await asyncio.to_thread(getattr(db, name), *args)
     guard = await run('preparation_guard')
@@ -22,18 +73,9 @@ async def prepare(db, provider, settings, lead_id, product_id, prices, stop, led
     try:
         product = await run('opening_inputs', lead_id, product_id)
         profile = dict(await run('agent_profile'))
-        voice = profile['tts_voice'] or settings.tts_voice
-        texts = [HELLO, NOTICE.format(agent_name=profile['agent_name'], product_name=product['name'])]
-        keys = [identity(text, settings, voice) for text in texts]
-        for key, text in zip(keys, texts):
-            if stop.is_set(): raise RuntimeError('Preparation interrupted')
-            audio = await run('opening_begin', key, text, settings.tts_model, voice, FORMAT)
-            if audio is None:
-                # Marker is durable BEFORE any external synthesis. No implicit retry on failure.
-                try:
-                    audio = await provider.speak(text, voice)
-                    await run('opening_save', key, audio, ledger)
-                except Exception: raise RuntimeError('Speech preparation unavailable') from None
+        messages = await run('product_messages', product_id)
+        texts = scripted_texts(product, profile, messages)
+        keys = await synthesize(run, provider, settings, texts, voice_of(profile, settings), ledger, stop)
         if stop.is_set(): raise RuntimeError('Preparation interrupted')
         call = await run('reserve', lead_id, product_id, (product['name'], *keys), profile)
         try:

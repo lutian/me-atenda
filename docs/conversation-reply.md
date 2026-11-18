@@ -31,3 +31,13 @@ As respostas não reapresentam a Bia nem repetem o que a abertura já disse, a m
 Em **Configurações → Agente de voz** o operador escolhe a voz do TTS e o nome do agente (padrão: Bia). A lista vem de `GET /settings/agent` e depende do modelo: `tts-1`/`tts-1-hd` aceitam alloy, ash, coral, echo, fable, onyx, nova, sage e shimmer; os modelos mais novos aceitam também ballad, verse, marin e cedar. Sem escolha salva, vale `OPENAI_TTS_VOICE`.
 
 `PATCH /settings/agent` exige `agent_name` (1 a 40 caracteres) e `tts_voice` da lista. Cada chamada registra o nome e a voz no momento da reserva. Mudanças posteriores valem só para as próximas chamadas; a abertura, o prompt e as respostas ao vivo usam o registro da chamada. Como o áudio preparado é indexado por texto e voz, trocar nome ou voz gera áudios novos.
+
+## Mensagens preparadas antes da ligação
+
+Em **Leads → Disparo unitário**, depois de escolher o produto:
+
+1. **Gerar texto com IA** (`POST /products/{id}/messages/draft`) sugere a apresentação a partir do nome e da descrição do produto. A despedida vem preenchida com "Entendi, obrigado pelo seu tempo.". Nada é salvo nem sintetizado nesse passo.
+2. O operador revisa os dois textos e clica em **Salvar e gerar áudios** (`PUT /products/{id}/messages`, apresentação de 1 a 400 caracteres e despedida de 1 a 200). O backend salva os textos e sintetiza, com a voz do agente, "Alô?", a abertura, a apresentação e a despedida. Áudios que já existem no cache (`opening_audio`) são reaproveitados.
+3. **Iniciar UMA ligação** só fica habilitado quando `GET /products/{id}/messages` responde `ready: true`.
+
+Trocar a voz ou o nome do agente faz `ready` voltar a `false`, porque os áudios são indexados por texto e voz. Editar o produto apaga os textos, que precisam ser revisados de novo. Se a síntese falhar, os textos ficam salvos, `ready` continua `false` e vale a regra de reconciliação manual do cache. A API ainda aceita discar sem mensagens preparadas, para manter o contrato de `POST /calls`; nesse caso a chamada não tem apresentação nem despedida prontas.

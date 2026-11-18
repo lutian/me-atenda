@@ -73,6 +73,37 @@ def editor(resource, title, fields):
     return records
 
 
+GOODBYE = "Entendi, obrigado pelo seu tempo."
+
+
+def prepared_messages(product_id):
+    """Review the drafted pitch and goodbye, then generate every prepared audio before dialing."""
+    st.markdown("**Mensagens preparadas**")
+    st.caption("Alô, abertura, apresentação (se houver interesse) e despedida (sem interesse ou contato errado) "
+               "ficam gravadas antes da ligação, sem esperar o TTS durante a conversa.")
+    status = api.product_messages(product_id)
+    pitch_key, goodbye_key = f"pitch-{product_id}", f"goodbye-{product_id}"
+    st.session_state.setdefault(pitch_key, status["pitch"] or "")
+    st.session_state.setdefault(goodbye_key, status["goodbye"] or GOODBYE)
+    if st.button("Gerar texto com IA", key=f"draft-{product_id}"):
+        draft = api.draft_messages(product_id)
+        st.session_state[pitch_key], st.session_state[goodbye_key] = draft["pitch"], draft["goodbye"]
+        st.rerun()
+    pitch = st.text_area("Apresentação (caso a pessoa tenha interesse)", key=pitch_key, max_chars=400)
+    goodbye = st.text_area("Despedida (sem interesse ou contato errado)", key=goodbye_key, max_chars=200)
+    if st.button("Salvar e gerar áudios", key=f"prepare-{product_id}"):
+        try: api.save_messages(product_id, pitch, goodbye)
+        except ValueError as exc:
+            st.error(str(exc))
+            return False
+        changed("Mensagens salvas e áudios gerados.")
+    if status["ready"]:
+        st.success("Áudios prontos para a ligação.")
+    else:
+        st.info("Revise os textos e clique em \"Salvar e gerar áudios\" antes de ligar.")
+    return status["ready"]
+
+
 def leads_page():
     leads = editor("leads", "Leads (fila)", [("name", "Nome"), ("phone", "Telefone E.164 (+5511999999999)"),
                                              ("company", "Empresa (opcional)")])
@@ -96,8 +127,9 @@ def leads_page():
     products = api.list("products")
     lead_id = select_record("Lead da chamada", leads, "dispatch-lead")
     product_id = select_record("Produto ofertado", products, "dispatch-product")
+    ready = prepared_messages(product_id) if product_id else False
     consent = st.checkbox("Conferi autorização/base legal, horário permitido e aviso de gravação.")
-    if st.button("Iniciar UMA ligação", disabled=not (lead_id and product_id and consent)):
+    if st.button("Iniciar UMA ligação", disabled=not (lead_id and product_id and consent and ready)):
         result = api.dispatch(lead_id, product_id)
         st.success(f'Chamada solicitada: {result["id"]}. Consulte o histórico antes de novo disparo.')
     st.caption("O backend serializa chamadas. Sem repetição automática; em timeout, consulte o histórico antes de tentar novamente.")

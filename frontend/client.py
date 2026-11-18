@@ -34,12 +34,12 @@ class APIClient:
             raise ValueError("Unknown resource.")
         return value
 
-    def _request(self, method, path, payload=None, binary=False):
+    def _request(self, method, path, payload=None, binary=False, timeout=None):
         data = json.dumps(payload).encode("utf-8") if payload is not None else None
         request = Request(self.base_url + path, data=data, method=method,
                           headers={"X-API-Key": self.api_key, "Content-Type": "application/json"})
         try:
-            with self._http.open(request, timeout=self.timeout) as response:
+            with self._http.open(request, timeout=timeout or self.timeout) as response:
                 content = response.read()
                 if binary:
                     return content, response.headers.get_content_type()
@@ -89,6 +89,30 @@ class APIClient:
             raise ValueError('Select a voice.')
         return self._agent_profile(self._request('PATCH', '/settings/agent',
                                                  {'agent_name': name.strip(), 'tts_voice': voice}))
+
+    @staticmethod
+    def _messages(data, status=True):
+        valid = isinstance(data, dict) and all(
+            data.get(k) is None or isinstance(data.get(k), str) for k in ('pitch', 'goodbye'))
+        if valid and status: valid = type(data.get('ready')) is bool
+        if not valid: raise APIError('Backend returned invalid prepared messages.')
+        return {k: data[k] for k in (('pitch', 'goodbye', 'ready') if status else ('pitch', 'goodbye'))}
+
+    def product_messages(self, product_id):
+        return self._messages(self._request('GET', f'/products/{self._id(product_id)}/messages'))
+
+    def draft_messages(self, product_id):
+        return self._messages(self._request('POST', f'/products/{self._id(product_id)}/messages/draft'), False)
+
+    def save_messages(self, product_id, pitch, goodbye):
+        product_id = self._id(product_id)
+        if not isinstance(pitch, str) or not 1 <= len(pitch.strip()) <= 400:
+            raise ValueError('Pitch must have 1 to 400 characters.')
+        if not isinstance(goodbye, str) or not 1 <= len(goodbye.strip()) <= 200:
+            raise ValueError('Goodbye must have 1 to 200 characters.')
+        # Up to four speech syntheses run in this request.
+        return self._messages(self._request('PUT', f'/products/{product_id}/messages',
+                                            {'pitch': pitch.strip(), 'goodbye': goodbye.strip()}, timeout=90))
 
     def list(self, resource):
         return self._request("GET", "/" + self._resource(resource))

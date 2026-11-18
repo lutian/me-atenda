@@ -52,6 +52,41 @@ class OpeningStore:
             db.execute("UPDATE opening_audio SET audio=%s,state='ready' WHERE digest=%s AND state='pending'",
                        (audio,digest))
 
+    def product_messages(self, product_id):
+        with self.connection() as db:
+            if not db.execute('SELECT id FROM products WHERE id=%s', (product_id,)).fetchone():
+                raise LookupError('not found')
+            row = db.execute('SELECT pitch,goodbye FROM product_messages WHERE product_id=%s',
+                             (product_id,)).fetchone()
+            return row or {'pitch': None, 'goodbye': None}
+
+    def save_product_messages(self, product_id, pitch, goodbye):
+        from psycopg.errors import ForeignKeyViolation
+        try:
+            with self.connection() as db:
+                return db.execute('INSERT INTO product_messages(product_id,pitch,goodbye) VALUES (%s,%s,%s) '
+                                  'ON CONFLICT (product_id) DO UPDATE SET pitch=EXCLUDED.pitch,goodbye=EXCLUDED.goodbye '
+                                  'RETURNING pitch,goodbye', (product_id, pitch, goodbye)).fetchone()
+        except ForeignKeyViolation as exc: raise LookupError('not found') from exc
+
+    def openings_ready(self, digests):
+        with self.connection() as db:
+            row = db.execute("SELECT count(*) AS n FROM opening_audio WHERE digest = ANY(%s) AND state='ready'",
+                             (list(set(digests)),)).fetchone()
+            return row['n'] == len(set(digests))
+
+    def opening_scripts(self, id):
+        """Prepared pitch/goodbye pinned to this call, or None when dialed without them."""
+        with self.connection() as db:
+            pins = db.execute('SELECT pitch,goodbye FROM call_openings WHERE call_id=%s', (id,)).fetchone()
+            result = {}
+            for kind in ('pitch', 'goodbye'):
+                digest = pins and pins[kind]
+                row = digest and db.execute("SELECT text,audio FROM opening_audio WHERE digest=%s AND state='ready'",
+                                            (digest,)).fetchone()
+                result[kind] = (row['text'], bytes(row['audio'])) if row else None
+            return result
+
     def opening_intro(self, id):
         with self.connection() as db:
             row = db.execute("SELECT a.text,a.audio FROM call_openings p JOIN opening_audio a "

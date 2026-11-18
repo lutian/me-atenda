@@ -28,6 +28,7 @@ class MemoryStore:
         self.answering = {}; self.answer_lock = threading.Lock()
         self.max_duration_seconds = 180
         self.profile = {'agent_name': 'Bia', 'tts_voice': None}
+        self.messages = {}
     def preparation_guard(self):
         if not self.preparing.acquire(blocking=False): raise ValueError('Speech preparation busy')
         return SimpleNamespace(close=self.preparing.release)
@@ -84,6 +85,7 @@ class MemoryStore:
         if row is None: raise LookupError()
         return dict(row)
     def product(self, data, chunks, id=None):
+        if id: self.messages.pop(id, None)
         id = id or len(self.products) + 1
         self.products[id] = dict(id=id, **data)
         return self.products[id]
@@ -99,6 +101,19 @@ class MemoryStore:
     def save_call_policy(self, seconds):
         self.max_duration_seconds = seconds
         return self.call_policy()
+    def product_messages(self, product_id):
+        self.get('products', product_id)
+        return dict(self.messages.get(product_id, {'pitch': None, 'goodbye': None}))
+    def save_product_messages(self, product_id, pitch, goodbye):
+        self.get('products', product_id)
+        self.messages[product_id] = {'pitch': pitch, 'goodbye': goodbye}
+        return dict(self.messages[product_id])
+    def openings_ready(self, digests):
+        return all(self.openings.get(d, {}).get('audio') for d in digests)
+    def opening_scripts(self, id):
+        pins = self.pins.get(id, ())
+        return {kind: (self.openings[pins[i]]['text'], self.openings[pins[i]]['audio']) if len(pins) > i else None
+                for kind, i in (('pitch', 3), ('goodbye', 4))}
     def agent_profile(self): return dict(self.profile)
     def save_agent_profile(self, name, voice):
         self.profile = {'agent_name': name, 'tts_voice': voice}
@@ -158,6 +173,7 @@ class Providers:
     async def transcribe(self, pcm): return 'Tenho interesse'
     async def answer(self, history, context, agent_name="Bia"): return {'text': 'Vamos conversar?', 'outcome': None}
     async def speak(self, text, voice=None): return b'\xff' * 160
+    async def draft(self, name, description, agent_name): return 'Pitch de teste?'
 
 
 class API(unittest.TestCase):

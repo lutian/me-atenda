@@ -13,7 +13,7 @@ from .observability import Recorder, billed_empty, call_scope
 from .security import public_url, signature_valid, websocket_signature_valid
 from .store import Store
 from .voice import session
-from .openings import prepared_call
+from .openings import GOODBYE, messages_status, prepare_messages, prepared_call
 from .answering import VERDICTS, twiml, ulaw_wav
 
 
@@ -46,6 +46,12 @@ class LeadPatch(BaseModel):
 class CallPolicy(BaseModel):
     model_config = ConfigDict(extra='forbid')
     max_duration_seconds: int = Field(strict=True, ge=1, le=14400)
+
+
+class Messages(BaseModel):
+    model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
+    pitch: str = Field(min_length=1, max_length=400)
+    goodbye: str = Field(min_length=1, max_length=200)
 
 
 class AgentProfile(BaseModel):
@@ -152,6 +158,29 @@ def create_app(settings=None, store=None, providers=None):
         if any(v is None for v in payload.values()): raise HTTPException(422, 'Null fields not allowed')
         merged = Product(**({k: old[k] for k in ('name', 'description')} | payload)).model_dump()
         return await save_product(merged, id)
+
+    @app.get('/products/{id}/messages', dependencies=[Depends(admin)])
+    async def product_messages(id: int):
+        try: return await messages_status(db, s, id)
+        except LookupError: raise HTTPException(404, 'Not found')
+
+    @app.post('/products/{id}/messages/draft', dependencies=[Depends(admin)])
+    async def draft_messages(id: int):
+        product = await run('get', 'products', id)
+        profile = await run('agent_profile')
+        try: pitch = await provider.draft(product['name'], product['description'], profile['agent_name'])
+        except Exception: raise HTTPException(503, 'Draft unavailable; write the pitch manually or retry')
+        return {'pitch': pitch, 'goodbye': GOODBYE}
+
+    @app.put('/products/{id}/messages', dependencies=[Depends(admin)])
+    async def save_messages(id: int, data: Messages):
+        try:
+            await prepare_messages(db, provider, s, id, data.pitch, data.goodbye, isinstance(provider, Providers))
+        except LookupError: raise HTTPException(404, 'Not found')
+        except ValueError as exc: raise HTTPException(409, str(exc))
+        except Exception:
+            raise HTTPException(503, 'Speech preparation unavailable; texts saved, audio not ready')
+        return await messages_status(db, s, id)
 
     @app.delete('/products/{id}', status_code=204, dependencies=[Depends(admin)])
     async def product_delete(id: int):
