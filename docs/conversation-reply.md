@@ -64,3 +64,9 @@ A resposta a "É com você que posso falar?" passa primeiro por uma regra determ
 - **contato errado**: "número errado", "engano", "ligou errado"… toca a despedida com `numero_errado`.
 
 A regra só decide quando **todas** as palavras da fala são reconhecidas; cumprimentos e "obrigado" são ignorados. Uma pergunta, uma palavra desconhecida, sinais misturados ("sim, mas agora não posso") ou mais de 10 palavras vão para o LLM, como antes. Nesse caminho não há embedding nem chamada ao LLM, então a espera é só a da transcrição.
+
+## Conversa como chat
+
+Depois de **Iniciar UMA ligação**, a tela **Leads** mostra a conversa da chamada como um chat: o lead à esquerda, o agente à direita. A tela consulta `GET /calls/{id}` a cada 2 segundos enquanto a chamada está em `ligando`; quando ela termina, mostra o status final e para de consultar. Uma falha momentânea do backend aparece como aviso, e a consulta continua.
+
+O **Histórico** usa o mesmo chat na "Transcrição completa", com o JSON num painel recolhível e o botão de download como antes. O conteúdo é sempre exibido como texto puro, nunca como Markdown ou HTML.

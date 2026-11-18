@@ -6,6 +6,7 @@ import streamlit as st
 
 from client import APIClient, APIError
 from imports import ImportValidationError, parse_leads
+from chat import render_chat
 from history import history_label, history_record
 from observability import render_audit
 
@@ -135,8 +136,39 @@ def leads_page():
     consent = st.checkbox("Conferi autorização/base legal, horário permitido e aviso de gravação.")
     if st.button("Iniciar UMA ligação", disabled=not (lead_id and product_id and consent and ready)):
         result = api.dispatch(lead_id, product_id)
+        st.session_state["live_call"], st.session_state["live_active"] = result["id"], True
         st.success(f'Chamada solicitada: {result["id"]}. Consulte o histórico antes de novo disparo.')
     st.caption("O backend serializa chamadas. Sem repetição automática; em timeout, consulte o histórico antes de tentar novamente.")
+    live_conversation()
+
+
+LIVE_SECONDS = 2
+
+
+def live_conversation():
+    """Conversation of the last dispatched call, refreshed while the call is in progress."""
+    call_id = st.session_state.get("live_call")
+    if not call_id:
+        return
+
+    @st.fragment(run_every=LIVE_SECONDS if st.session_state.get("live_active") else None)
+    def panel():
+        st.subheader(f"Conversa em tempo real — chamada {call_id}")
+        try: call = api.call(call_id)
+        except APIError as exc:
+            # Fragment reruns bypass the page-level handler; keep polling after a transient failure.
+            st.warning(f"Não foi possível atualizar a conversa: {exc}")
+            return
+        render_chat(st, call.get("transcription_json"))
+        if call.get("status_final") == "ligando":
+            st.caption(f"Em andamento; atualiza a cada {LIVE_SECONDS} segundos.")
+        else:
+            st.info(f'Chamada encerrada: {call.get("status_final")}.')
+            if st.session_state.get("live_active"):
+                st.session_state["live_active"] = False  # Stop polling a finished call.
+                st.rerun()
+
+    panel()
 
 
 def history_page():
@@ -171,9 +203,9 @@ def history_page():
     st.subheader("Transcrição completa")
     transcript = call.get("transcription_json") or []
     # Text rendering only: never interpret model/lead content as HTML.
-    for turn in transcript:
-        st.text(f'{turn.get("role", "")}\n{turn.get("content", "")}')
-    st.json(transcript)
+    render_chat(st, transcript)
+    with st.expander("JSON da transcrição"):
+        st.json(transcript)
     st.download_button("Baixar transcrição JSON", json.dumps(transcript, ensure_ascii=False, indent=2),
                        file_name=f"call-{call_id}.json", mime="application/json")
 

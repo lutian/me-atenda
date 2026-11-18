@@ -76,6 +76,7 @@ class FakeAPI:
         return dict(self.status)
     def dispatch(self, lead_id, product_id):
         self.dispatched.append((lead_id, product_id)); return {'id': 1}
+    def call(self, call_id): return {'id': call_id, 'status_final': 'ligando', 'transcription_json': []}
 
 
 @unittest.skipUnless(importlib.util.find_spec('streamlit'), 'Streamlit image required')
@@ -115,6 +116,7 @@ class DispatchUI(unittest.TestCase):
         self.app.checkbox[0].check().run()
         self.assertFalse(self.call_button().disabled)
         self.call_button().click().run()
+        self.assertFalse(self.app.exception)
         self.assertEqual(self.api.dispatched, [(1, 1)])
 
     def test_saved_messages_are_loaded_and_goodbye_defaults(self):
