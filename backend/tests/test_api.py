@@ -79,6 +79,50 @@ class MemoryStore:
         return len(self.events)
     def event_finish(self, id, event): self.events[id-1].update(event)
     def pricing_settings(self): return getattr(self, 'pricing', None)
+    # Model catalog double: same contract as Store.
+    def catalog(self):
+        if not hasattr(self, 'ai_models'): self.ai_models, self.active = {}, {}
+        return self.ai_models
+    def models(self):
+        from app.catalog import model_view
+        rows = sorted(self.catalog().values(), key=lambda m: (m['kind'], m['name']))
+        return [model_view(m, m['costs'], self.active.get(m['kind']) == m['id']) for m in rows]
+    def model(self, id):
+        found = [m for m in self.models() if m['id'] == id]
+        if not found: raise LookupError()
+        return found[0]
+    def model_create(self, name, kind, costs):
+        if any(m['name'] == name for m in self.catalog().values()): raise ValueError('Model name already exists')
+        id = max(self.ai_models, default=0) + 1
+        self.ai_models[id] = {'id': id, 'name': name, 'kind': kind, 'costs': dict(costs)}
+        return self.model(id)
+    def model_update(self, id, name, kind, costs):
+        row = self.catalog().get(id)
+        if row is None: raise LookupError()
+        if self.active.get(row['kind']) == id and kind != row['kind']: raise ValueError('Model in use')
+        if any(m['name'] == name and m['id'] != id for m in self.ai_models.values()): raise ValueError('Model name already exists')
+        row.update(name=name, kind=kind, costs=dict(costs))
+        return self.model(id)
+    def model_delete(self, id):
+        if id in self.active.values(): raise ValueError('Model in use')
+        if self.catalog().pop(id, None) is None: raise LookupError()
+    def model_selection(self):
+        self.catalog()
+        return {k: {'id': id, 'name': self.ai_models[id]['name']} for k, id in self.active.items()}
+    def select_models(self, mapping):
+        for kind, id in mapping.items():
+            if id not in self.catalog(): raise LookupError()
+            if self.ai_models[id]['kind'] != kind: raise ValueError('Model does not belong to this option')
+        self.active.update(mapping)
+        return self.model_selection()
+    def ensure_models(self, defaults):
+        for kind, name in defaults.items():
+            self.catalog()
+            if kind in self.active: continue
+            found = [m for m in self.ai_models.values() if m['name'] == name]
+            if not found: found = [self.ai_models[self.model_create(name, kind, {})['id']]]
+            if found[0]['kind'] == kind: self.active[kind] = found[0]['id']
+        return self.model_selection()
     def save_pricing_settings(self, config): self.pricing = json.loads(json.dumps(config))
     def account_call(self, id, snapshot): self.snapshots.setdefault(id, snapshot)
     def health(self): return True

@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, WebSocket
 from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator
+from .catalog import KIND_RATES, KINDS, NAME, SETTING_OF, full_costs, valid_costs
 from .config import Settings
 from .providers import CallCreationRejected, Providers, voices
 from .observability import Recorder, billed_empty, call_scope, pricing
@@ -71,10 +72,30 @@ class AgentProfile(BaseModel):
 
 
 class Pricing(BaseModel):
-    """USD rates as decimal strings; the server assigns the version."""
+    """Twilio USD rates as decimal strings; model rates live in the model catalog."""
     model_config = ConfigDict(extra='forbid')
-    models: dict[str, dict[str, StrictStr]] = {}
     twilio: dict[str, StrictStr] = {}
+
+
+class AIModel(BaseModel):
+    model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
+    name: str
+    kind: str
+    costs: dict[str, Optional[StrictStr]] = {}
+
+
+class AIModelPatch(BaseModel):
+    model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
+    name: Optional[str] = None
+    kind: Optional[str] = None
+    costs: Optional[dict[str, Optional[StrictStr]]] = None
+
+
+class ModelSelection(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    text: int
+    audio: int
+    embedding: int
 
 
 class Dial(BaseModel):
@@ -88,11 +109,32 @@ def create_app(settings=None, store=None, providers=None):
     db = store or Store(s.database_url)
     provider = providers or Providers(s)
     recorder = Recorder(db, s)
-    try: stored = db.pricing_settings()
-    except Exception:
-        stored = None
-        logging.getLogger(__name__).warning('pricing_settings_unavailable')
-    if stored is not None: recorder.use(pricing(json.dumps(stored)), 'settings')
+    base_prices = dict(recorder.prices)
+    twilio = {'rates': base_prices.get('twilio', {}), 'source': 'environment' if base_prices.get('twilio') else 'none'}
+
+    def apply_selection(selection):
+        # Providers read these fields on every request, so the next request uses the new model.
+        for kind, chosen in selection.items(): setattr(s, SETTING_OF[kind], chosen['name'])
+
+    def compose_prices(catalog):
+        models = dict(base_prices.get('models', {}))
+        for item in catalog:
+            rates = {k: v for k, v in item['costs'].items() if v is not None}
+            if rates: models[item['name']] = rates
+        version = 'painel-' + datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+        recorder.use(pricing(json.dumps({'version': version, 'currency': 'USD', 'models': models,
+                                         'twilio': twilio['rates']})), twilio['source'])
+
+    try:
+        stored = db.pricing_settings()
+        if stored is not None: twilio.update(rates=stored.get('twilio', {}), source='settings')
+        apply_selection(db.ensure_models({kind: getattr(s, SETTING_OF[kind]) for kind in KINDS}))
+        compose_prices(db.models())
+    except Exception as exc:
+        # Missing tables or a fake store: keep the environment models and prices.
+        logging.getLogger(__name__).warning('model_catalog_unavailable %s', type(exc).__name__)
+
+    async def refresh_prices(): compose_prices(await run('models'))
     if isinstance(provider, Providers): provider.observer = recorder
     app = FastAPI(title='Outbound agent', docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -160,23 +202,64 @@ def create_app(settings=None, store=None, providers=None):
         return profile_view(await run('save_agent_profile', data.agent_name, data.tts_voice))
 
     def pricing_view():
-        prices = recorder.prices
-        return {'source': recorder.source, 'version': prices.get('version'),
-                'models': prices.get('models', {}), 'twilio': prices.get('twilio', {}),
-                'configured_models': {'chat': s.chat_model, 'embedding': s.embedding_model, 'tts': s.tts_model}}
+        return {'source': twilio['source'], 'version': recorder.prices.get('version'), 'twilio': twilio['rates']}
 
     @app.get('/settings/pricing', dependencies=[Depends(admin)])
     async def pricing_settings(): return pricing_view()
 
     @app.put('/settings/pricing', dependencies=[Depends(admin)])
     async def save_pricing_settings(data: Pricing):
-        version = 'painel-' + datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
-        config = {'version': version, 'currency': 'USD', 'models': data.models, 'twilio': data.twilio}
-        try: prices = pricing(json.dumps(config))
+        try: pricing(json.dumps({'version': 'check', 'currency': 'USD', 'twilio': data.twilio}))
         except ValueError: raise HTTPException(422, 'Invalid rates: use non-negative decimal numbers')
-        await run('save_pricing_settings', config)
-        recorder.use(prices, 'settings')  # New events and calls only; snapshots keep history.
+        await run('save_pricing_settings', {'twilio': data.twilio})
+        twilio.update(rates=data.twilio, source='settings')
+        await refresh_prices()  # New events and calls only; snapshots keep history.
         return pricing_view()
+
+    def checked_model(name, kind, costs):
+        if not isinstance(name, str) or not NAME.fullmatch(name): raise HTTPException(422, 'Invalid model name')
+        if kind not in KINDS: raise HTTPException(422, 'Option must be text, audio or embedding')
+        if not valid_costs(kind, costs): raise HTTPException(422, 'Invalid costs for this option')
+        return name, kind, full_costs(kind, costs)
+
+    @app.get('/models', dependencies=[Depends(admin)])
+    async def models(): return await run('models')
+
+    @app.post('/models', status_code=201, dependencies=[Depends(admin)])
+    async def model_create(data: AIModel):
+        result = await run('model_create', *checked_model(data.name, data.kind, data.costs))
+        await refresh_prices()
+        return result
+
+    @app.patch('/models/{id}', dependencies=[Depends(admin)])
+    async def model_update(id: int, data: AIModelPatch):
+        old = await run('model', id)
+        kind = data.kind if data.kind is not None else old['kind']
+        costs = data.costs if data.costs is not None else (old['costs'] if kind == old['kind'] else {})
+        result = await run('model_update', id, *checked_model(data.name or old['name'], kind, costs))
+        await refresh_prices()
+        if result['active']: apply_selection(await run('model_selection'))  # A renamed model in use.
+        return result
+
+    @app.delete('/models/{id}', status_code=204, dependencies=[Depends(admin)])
+    async def model_delete(id: int):
+        await run('model_delete', id)
+        await refresh_prices()
+        return Response(status_code=204)
+
+    @app.get('/settings/models', dependencies=[Depends(admin)])
+    async def model_selection(): return await run('model_selection')
+
+    @app.put('/settings/models', dependencies=[Depends(admin)])
+    async def select_models(data: ModelSelection):
+        catalog = {m['id']: m for m in await run('models')}
+        mapping = data.model_dump()
+        for kind, id in mapping.items():
+            if id not in catalog: raise HTTPException(404, 'Model not found')
+            if catalog[id]['kind'] != kind: raise HTTPException(422, 'Model does not belong to this option')
+        selection = await run('select_models', mapping)
+        apply_selection(selection)
+        return selection
 
     @app.get('/products', dependencies=[Depends(admin)])
     async def products(): return await run('list', 'products')

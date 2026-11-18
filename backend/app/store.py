@@ -125,6 +125,89 @@ class Store(AnsweringStore, OpeningStore, AccountingStore):
             if not row: raise RuntimeError('Call policy missing')
             return row
 
+    @staticmethod
+    def rate(value):
+        return None if value is None else format(value, 'f')
+
+    def models(self):
+        from .catalog import ALL_RATES, model_view
+        with self.connection() as db:
+            rows = db.execute('SELECT m.id,m.name,m.kind,c.input_per_million,c.cached_input_per_million,'
+                              'c.output_per_million,c.characters_per_million,(a.kind IS NOT NULL) AS active '
+                              'FROM ai_models m LEFT JOIN model_costs c ON c.model_id=m.id '
+                              'LEFT JOIN active_models a ON a.model_id=m.id ORDER BY m.kind,m.name').fetchall()
+        return [model_view(row, {k: self.rate(row[k]) for k in ALL_RATES}, row['active']) for row in rows]
+
+    def model(self, id):
+        found = [m for m in self.models() if m['id'] == id]
+        if not found: raise LookupError('not found')
+        return found[0]
+
+    @staticmethod
+    def save_costs(db, id, costs):
+        from .catalog import ALL_RATES
+        values = [costs.get(k) for k in ALL_RATES]
+        db.execute('INSERT INTO model_costs(model_id,input_per_million,cached_input_per_million,output_per_million,'
+                   'characters_per_million) VALUES (%s,%s,%s,%s,%s) ON CONFLICT (model_id) DO UPDATE SET '
+                   'input_per_million=EXCLUDED.input_per_million,cached_input_per_million=EXCLUDED.cached_input_per_million,'
+                   'output_per_million=EXCLUDED.output_per_million,characters_per_million=EXCLUDED.characters_per_million,'
+                   'updated_at=now()', [id] + values)
+
+    def model_create(self, name, kind, costs):
+        import psycopg
+        try:
+            with self.connection() as db:
+                id = db.execute('INSERT INTO ai_models(name,kind) VALUES (%s,%s) RETURNING id', (name, kind)).fetchone()['id']
+                self.save_costs(db, id, costs)
+        except psycopg.errors.UniqueViolation: raise ValueError('Model name already exists') from None
+        return self.model(id)
+
+    def model_update(self, id, name, kind, costs):
+        import psycopg
+        try:
+            with self.connection() as db:
+                row = db.execute('SELECT m.kind,(a.kind IS NOT NULL) AS active FROM ai_models m LEFT JOIN active_models a '
+                                 'ON a.model_id=m.id WHERE m.id=%s FOR UPDATE OF m', (id,)).fetchone()
+                if not row: raise LookupError('not found')
+                if row['active'] and kind != row['kind']: raise ValueError('Model in use; select another model first')
+                db.execute('UPDATE ai_models SET name=%s,kind=%s WHERE id=%s', (name, kind, id))
+                self.save_costs(db, id, costs)
+        except psycopg.errors.UniqueViolation: raise ValueError('Model name already exists') from None
+        return self.model(id)
+
+    def model_delete(self, id):
+        with self.connection() as db:
+            if db.execute('SELECT 1 FROM active_models WHERE model_id=%s', (id,)).fetchone():
+                raise ValueError('Model in use; select another model first')
+            if not db.execute('DELETE FROM ai_models WHERE id=%s RETURNING id', (id,)).fetchone():
+                raise LookupError('not found')
+
+    def model_selection(self):
+        with self.connection() as db:
+            rows = db.execute('SELECT a.kind,m.id,m.name FROM active_models a JOIN ai_models m ON m.id=a.model_id').fetchall()
+        return {row['kind']: {'id': row['id'], 'name': row['name']} for row in rows}
+
+    def select_models(self, mapping):
+        with self.connection() as db:
+            for kind, id in mapping.items():
+                found = db.execute('SELECT kind FROM ai_models WHERE id=%s FOR SHARE', (id,)).fetchone()
+                if not found: raise LookupError('not found')
+                if found['kind'] != kind: raise ValueError('Model does not belong to this option')
+                db.execute('INSERT INTO active_models(kind,model_id) VALUES (%s,%s) ON CONFLICT (kind) '
+                           'DO UPDATE SET model_id=EXCLUDED.model_id', (kind, id))
+        return self.model_selection()
+
+    def ensure_models(self, defaults):
+        """The environment models become the selection only for options that have none yet."""
+        with self.connection() as db:
+            db.execute('SELECT pg_advisory_xact_lock(743282)')
+            for kind, name in defaults.items():
+                if db.execute('SELECT 1 FROM active_models WHERE kind=%s', (kind,)).fetchone(): continue
+                db.execute('INSERT INTO ai_models(name,kind) VALUES (%s,%s) ON CONFLICT (name) DO NOTHING', (name, kind))
+                db.execute('INSERT INTO active_models(kind,model_id) SELECT %s,id FROM ai_models '
+                           'WHERE name=%s AND kind=%s ON CONFLICT (kind) DO NOTHING', (kind, name, kind))
+        return self.model_selection()
+
     def pricing_settings(self):
         with self.connection() as db:
             row = db.execute('SELECT config FROM pricing_settings WHERE id=TRUE').fetchone()
