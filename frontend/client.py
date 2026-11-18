@@ -12,6 +12,9 @@ class NoRedirect(HTTPRedirectHandler):
 
 MESSAGE_FIELDS = ('opening', 'pitch', 'goodbye')
 RATE = re.compile(r'\d{1,18}(?:\.\d{1,18})?')
+MODEL_NAME = re.compile(r'[A-Za-z0-9_.:/-]{1,120}')
+KIND_RATES = {'text': ('input_per_million', 'cached_input_per_million', 'output_per_million'),
+              'embedding': ('input_per_million',), 'audio': ('characters_per_million',)}
 
 
 class APIError(Exception):
@@ -97,20 +100,72 @@ class APIClient:
 
     @staticmethod
     def _pricing(data):
-        keys = ('source', 'version', 'models', 'twilio', 'configured_models')
-        if (not isinstance(data, dict) or any(k not in data for k in keys) or not isinstance(data['models'], dict)
-                or not isinstance(data['twilio'], dict) or not isinstance(data['configured_models'], dict)):
+        keys = ('source', 'version', 'twilio')
+        if not isinstance(data, dict) or any(k not in data for k in keys) or not isinstance(data['twilio'], dict):
             raise APIError('Backend returned invalid pricing.')
         return {k: data[k] for k in keys}
 
     def pricing_settings(self):
         return self._pricing(self._request('GET', '/settings/pricing'))
 
-    def save_pricing_settings(self, models, twilio):
-        rates = [rate for group in models.values() for rate in group.values()] + list(twilio.values())
-        if not all(isinstance(rate, str) and RATE.fullmatch(rate) for rate in rates):
+    @staticmethod
+    def _rates(values):
+        if not all(value is None or (isinstance(value, str) and RATE.fullmatch(value)) for value in values):
             raise ValueError('Rates must be non-negative numbers with a dot as decimal separator, e.g. 0.15.')
-        return self._pricing(self._request('PUT', '/settings/pricing', {'models': models, 'twilio': twilio}))
+
+    def save_pricing_settings(self, twilio):
+        self._rates(twilio.values())
+        return self._pricing(self._request('PUT', '/settings/pricing', {'twilio': twilio}))
+
+    @staticmethod
+    def _model(data):
+        if (not isinstance(data, dict) or type(data.get('id')) is not int or not isinstance(data.get('name'), str)
+                or data.get('kind') not in KIND_RATES or not isinstance(data.get('costs'), dict)
+                or type(data.get('active')) is not bool):
+            raise APIError('Backend returned an invalid model.')
+        return {k: data[k] for k in ('id', 'name', 'kind', 'costs', 'active')}
+
+    @staticmethod
+    def _checked_model(name, kind, costs):
+        if not isinstance(name, str) or not MODEL_NAME.fullmatch(name.strip()):
+            raise ValueError('Model name: 1 to 120 letters, digits, dot, dash, underscore, colon or slash.')
+        if kind not in KIND_RATES: raise ValueError('Option must be text, audio or embedding.')
+        if not set(costs) <= set(KIND_RATES[kind]): raise ValueError('These costs do not apply to this option.')
+        APIClient._rates(costs.values())
+        return {'name': name.strip(), 'kind': kind, 'costs': costs}
+
+    def models(self):
+        data = self._request('GET', '/models')
+        if not isinstance(data, list): raise APIError('Backend returned invalid models.')
+        return [self._model(item) for item in data]
+
+    def create_model(self, name, kind, costs):
+        return self._model(self._request('POST', '/models', self._checked_model(name, kind, costs)))
+
+    def update_model(self, model_id, name, kind, costs):
+        return self._model(self._request('PATCH', f'/models/{self._id(model_id)}',
+                                         self._checked_model(name, kind, costs)))
+
+    def delete_model(self, model_id):
+        return self._request('DELETE', f'/models/{self._id(model_id)}')
+
+    @staticmethod
+    def _selection(data):
+        if not isinstance(data, dict) or not all(
+                isinstance(v, dict) and type(v.get('id')) is int and isinstance(v.get('name'), str) for v in data.values()):
+            raise APIError('Backend returned an invalid model selection.')
+        return data
+
+    def model_selection(self):
+        return self._selection(self._request('GET', '/settings/models'))
+
+    def select_models(self, text, audio, embedding):
+        return self._selection(self._request('PUT', '/settings/models', {
+            'text': self._id(text), 'audio': self._id(audio), 'embedding': self._id(embedding)}))
+
+    def update_embeddings(self, product_id):
+        # Embeds the product description again with the model in use.
+        return self._request('POST', f'/products/{self._id(product_id)}/embeddings', timeout=90)
 
     @staticmethod
     def _messages(data, status=True):

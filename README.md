@@ -87,8 +87,8 @@ Edite o `.env`:
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER` | valores do passo 3 |
 | `PUBLIC_BASE_URL` | `https://seu-nome.ngrok-free.app`, o domínio do passo 4, sem barra no final |
 | `OPENAI_API_KEY` | chave do passo 2 |
-| `OPENAI_CHAT_MODEL` | modelo de chat da sua conta OpenAI (sem a variável, o Compose usa `gpt-4o-mini`) |
-| `OPENAI_TTS_MODEL`, `OPENAI_TTS_VOICE` | `tts-1` e uma voz padrão (`alloy`, `coral`, `shimmer`…); a voz pode ser trocada depois no painel |
+| `OPENAI_CHAT_MODEL` | modelo de textos inicial (sem a variável, o Compose usa `gpt-4o-mini`); depois pode ser trocado no painel |
+| `OPENAI_TTS_MODEL`, `OPENAI_TTS_VOICE` | `tts-1` e uma voz padrão (`alloy`, `coral`, `shimmer`…); modelo e voz podem ser trocados depois no painel |
 | `WHISPER_*` | deixe `base`, `pt`, `cpu`, `int8` |
 
 A senha do banco vale a partir da primeira inicialização: mudá-la depois no `.env` não altera um banco que já existe.
@@ -136,7 +136,8 @@ Abra http://localhost:8501.
 1. **Configurações:**
    - **Agente de voz:** escolha a voz e o nome do agente (por exemplo "Bia") e clique em **Salvar agente**.
    - **Duração máxima** da chamada.
-   - **Custos por uso (USD):** preencha as tarifas para a Observabilidade calcular o custo de cada ligação e o total (veja [como obter os valores](#tarifas-e-cálculo-do-custo)). Sem tarifas, os custos aparecem como desconhecidos.
+   - **Modelos de IA:** o catálogo já vem com `gpt-6.1-sol`, `gpt-6.2-sol`, `text-embedding-3-small` e `tts-1`, com os preços oficiais. Cadastre modelos novos quando quiser, indicando a opção (textos, áudios ou embeddings) e os custos, e escolha em **Modelo em uso por opção** qual modelo cada opção usa (veja [modelos e custos](#tarifas-e-cálculo-do-custo)).
+   - **Custos da Twilio (USD):** preencha a tarifa por minuto e a de detecção de secretária para a Observabilidade estimar o custo da ligação.
 2. **Produtos → Cadastrar:** preencha os três campos. A IA gera a partir deles as mensagens preparadas (abertura e apresentação), e durante a ligação o agente busca na descrição as respostas para o lead.
    - **Nome:** o nome que o agente fala na abertura.
    - **Descrição comercial:** o que é o produto, para quem serve, benefícios e informações que o agente pode usar. Escreva de forma clara e completa: o agente não inventa o que não está escrito.
@@ -416,23 +417,38 @@ A seção **Observabilidade** mostra contagem global de requisições/erros e pe
 
 ### Tarifas e cálculo do custo
 
-As tarifas ficam em **Configurações → Custos por uso (USD)**, em dólares e com ponto como separador decimal (`0.15`). O formulário mostra os modelos configurados no `.env`:
+**Modelos de IA.** Em **Configurações → Modelos de IA** fica o catálogo de modelos, guardado em duas tabelas: os modelos (`ai_models`, com nome e opção) e os custos de cada modelo (`model_costs`). Cada modelo pertence a uma opção, e cada opção tem os seus custos, em USD e com ponto como separador decimal (`0.15`):
 
-| Grupo | Campo | Onde obter o valor |
+| Opção | Para que serve | Custos |
 |---|---|---|
-| Chat (`OPENAI_CHAT_MODEL`) | entrada, entrada em cache e saída, por 1 milhão de tokens | https://openai.com/api/pricing, na linha do modelo |
-| Embeddings (`OPENAI_EMBEDDING_MODEL`) | entrada, por 1 milhão de tokens | mesma página, seção de embeddings |
-| Voz (`OPENAI_TTS_MODEL`) | por 1 milhão de caracteres | mesma página, seção de TTS |
-| Twilio | ligação, por minuto | https://www.twilio.com/en-us/voice/pricing: escolha o país do lead (por exemplo Brasil) e use a tarifa de chamadas de saída (*outbound*) para celular ou fixo, conforme o seu público |
-| Twilio | detecção de secretária (AMD), por chamada | mesma página da Twilio, item *Answering Machine Detection* |
+| Textos | respostas do agente e rascunhos das mensagens | entrada, entrada em cache e saída, por 1 milhão de tokens |
+| Áudios | voz do agente (TTS) | por 1 milhão de caracteres |
+| Embeddings | busca na descrição do produto | entrada, por 1 milhão de tokens |
+
+Os preços estão em https://openai.com/api/pricing. O catálogo inicial usa os valores oficiais consultados em 18/11/2026: `gpt-6.1-sol` e `gpt-6.2-sol` a US$ 2,00 (entrada), 0,10 (cache) e 10,00 (saída); `text-embedding-3-small` a US$ 0,02; `tts-1` a US$ 15,00 por milhão de caracteres. Confira antes de usar, porque os preços mudam.
+
+Em **Modelo em uso por opção** você escolhe o modelo de cada opção. As variáveis `OPENAI_CHAT_MODEL`, `OPENAI_TTS_MODEL` e `OPENAI_EMBEDDING_MODEL` do `.env` só definem a escolha inicial; depois vale o que foi salvo no painel. Ao trocar:
+
+- **textos:** as próximas respostas e rascunhos já usam o modelo novo;
+- **áudios:** os áudios das mensagens preparadas precisam ser gerados de novo (a tela de ligação mostra "não prontas");
+- **embeddings:** nada é recalculado. Cada produto guarda o modelo dos seus embeddings, e os produtos de outro modelo ficam **indisponíveis** (sem rascunho nem ligação) até você clicar em **Atualizar embeddings** em **Produtos**. O botão só aparece nesses produtos. O modelo precisa gerar vetores de 1536 dimensões.
+
+Um modelo em uso não pode ser excluído nem mudar de opção: escolha outro antes.
+
+**Twilio.** Em **Configurações → Custos da Twilio (USD)**:
+
+| Campo | Onde obter o valor |
+|---|---|
+| Ligação, por minuto | https://www.twilio.com/en-us/voice/pricing: escolha o país do lead (por exemplo Brasil) e use a tarifa de chamadas de saída (*outbound*) para celular ou fixo, conforme o seu público |
+| Detecção de secretária (AMD), por chamada | mesma página, item *Answering Machine Detection* |
 
 O Whisper roda na sua máquina e não tem tarifa de provedor.
 
-**Sobre a Twilio:** a tarifa por minuto é só uma estimativa. Ela é cobrada por minuto iniciado e pode variar por operadora de destino. Para ver o valor que a Twilio realmente cobrou numa ligação, use o botão **Consultar cobrança de conectividade na Twilio** na auditoria da chamada ([detalhes](#consultar-cobrança-sem-discar-novamente)). Esse valor aparece separado da estimativa e não é somado a ela.
+A tarifa da Twilio é só uma estimativa: ela é cobrada por minuto iniciado e pode variar por operadora de destino. Para ver o valor que a Twilio realmente cobrou numa ligação, use o botão **Consultar cobrança de conectividade na Twilio** na auditoria da chamada ([detalhes](#consultar-cobrança-sem-discar-novamente)). Esse valor aparece separado da estimativa e não é somado a ela.
 
-Cada evento e cada chamada guardam uma cópia das tarifas em vigor (`pricing_snapshot`). Salvar novos valores vale para as próximas requisições e ligações e **não recalcula o histórico**: eventos registrados sem tarifa continuam com custo desconhecido. Campos vazios deixam aquela operação sem preço; o resumo então mostra um subtotal `partial`.
+Cada evento e cada chamada guardam uma cópia das tarifas em vigor (`pricing_snapshot`). Mudar custos vale para as próximas requisições e ligações e **não recalcula o histórico**: eventos registrados sem tarifa continuam com custo desconhecido. Custos vazios deixam aquela operação sem preço; o resumo então mostra um subtotal `partial`.
 
-A variável `OBSERVABILITY_PRICING_JSON`, opcional e repassada somente ao backend, continua aceita como valor inicial. Quando há tarifas salvas no painel, elas têm prioridade. Não há preços oficiais embutidos no código.
+A variável `OBSERVABILITY_PRICING_JSON`, opcional e repassada somente ao backend, continua aceita como valor inicial. Os custos do catálogo e as tarifas da Twilio salvas no painel têm prioridade sobre ela. Não há preços oficiais embutidos no código.
 
 Schema: objeto com `version` (string), `currency` igual a `USD`, `models` indexado pelo **nome do modelo solicitado** e `twilio`. Tarifas são strings decimais finitas e não negativas. Modelos aceitam `input_per_million`, `cached_input_per_million`, `output_per_million` e/ou `characters_per_million`; Twilio aceita `voice_per_minute` e `amd_per_call`. Configure somente as tarifas que você confirmou e controle a versão.
 

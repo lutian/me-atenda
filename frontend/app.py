@@ -136,7 +136,12 @@ def leads_page():
     products = api.list("products")
     lead_id = select_record("Lead da chamada", leads, "dispatch-lead")
     product_id = select_record("Produto ofertado", products, "dispatch-product")
-    ready = prepared_messages(product_id) if product_id else False
+    product = next((p for p in products if p["id"] == product_id), None)
+    if product and product.get("embeddings_current") is False:
+        st.error("Este produto tem embeddings de outro modelo. Atualize os embeddings em Produtos antes de ligar.")
+        ready = False
+    else:
+        ready = prepared_messages(product_id) if product_id else False
     consent = st.checkbox("Conferi autorização/base legal, horário permitido e aviso de gravação.")
     if st.button("Iniciar UMA ligação", disabled=not (lead_id and product_id and consent and ready)):
         result = api.dispatch(lead_id, product_id)
@@ -256,54 +261,127 @@ def settings_page():
     pricing_form()
 
 
-# (group, rate key, label) per configured model kind; Whisper runs locally and has no provider rate.
-PRICE_FIELDS = {
-    "chat": [("input_per_million", "Entrada, por 1 milhão de tokens"),
-             ("cached_input_per_million", "Entrada em cache, por 1 milhão de tokens"),
-             ("output_per_million", "Saída, por 1 milhão de tokens")],
-    "embedding": [("input_per_million", "Entrada, por 1 milhão de tokens")],
-    "tts": [("characters_per_million", "Por 1 milhão de caracteres")],
-}
-PRICE_TITLES = {"chat": "Chat (respostas e rascunhos)", "embedding": "Embeddings (busca na descrição)",
-                "tts": "Voz (TTS)"}
+KIND_LABELS = {"text": "Textos (mensagens e respostas)", "audio": "Áudios (voz do agente)",
+               "embedding": "Embeddings (busca na descrição)"}
+RATE_LABELS = {"input_per_million": "Entrada, por 1 milhão de tokens",
+               "cached_input_per_million": "Entrada em cache, por 1 milhão de tokens",
+               "output_per_million": "Saída, por 1 milhão de tokens",
+               "characters_per_million": "Por 1 milhão de caracteres"}
+KIND_RATES = {"text": ("input_per_million", "cached_input_per_million", "output_per_million"),
+              "embedding": ("input_per_million",), "audio": ("characters_per_million",)}
 TWILIO_FIELDS = [("voice_per_minute", "Ligação, por minuto"), ("amd_per_call", "Detecção de secretária (AMD), por chamada")]
 
 
+def cost_inputs(kind, saved, prefix):
+    """Text fields for the rates of one option; empty means no price (unknown cost)."""
+    values = {rate: st.text_input(RATE_LABELS[rate], value=saved.get(rate) or "", key=f"{prefix}{rate}")
+              for rate in KIND_RATES[kind]}
+    return {rate: value.strip() or None for rate, value in values.items()}
+
+
 def pricing_form():
-    st.subheader("Custos por uso (USD)")
-    prices = api.pricing_settings()
-    models = prices["configured_models"]
-    source = {"settings": "salvos neste painel", "environment": "variável OBSERVABILITY_PRICING_JSON",
-              "none": "nenhum valor configurado"}.get(prices["source"], prices["source"])
-    st.caption(f"Valores em vigor: {source}. Use ponto como separador decimal (0.15). Campos vazios ficam sem preço, "
-               "e o custo dessas operações aparece como desconhecido.")
-    st.caption("OpenAI: veja os preços de cada modelo em https://openai.com/api/pricing. Twilio: veja a tarifa de "
-               "chamadas de saída para o país do lead em https://www.twilio.com/en-us/voice/pricing.")
-    st.caption("Os novos valores valem para as próximas requisições e ligações; eventos antigos mantêm o preço da época.")
-    with st.form("pricing"):
-        values = {}
-        for kind, fields in PRICE_FIELDS.items():
-            model = models[kind]
-            st.markdown(f"**{PRICE_TITLES[kind]}**")
-            st.caption(f"Modelo: {model}")
-            saved = prices["models"].get(model, {})
-            values[kind] = {rate: st.text_input(label, value=saved.get(rate, ""), key=f"price-{kind}-{rate}")
-                            for rate, label in fields}
-        st.markdown("**Twilio**")
-        twilio = {rate: st.text_input(label, value=prices["twilio"].get(rate, ""), key=f"price-twilio-{rate}")
-                  for rate, label in TWILIO_FIELDS}
-        save = st.form_submit_button("Salvar custos")
+    models_section()
+    twilio_form()
+
+
+def models_section():
+    st.subheader("Modelos de IA")
+    st.caption("Cadastre os modelos de cada opção com o custo em USD (ponto como separador decimal, ex.: 0.15). "
+               "Preços da OpenAI: https://openai.com/api/pricing. Novos custos valem para as próximas requisições; "
+               "eventos antigos mantêm o preço da época.")
+    models = api.models()
+    st.dataframe([{"Modelo": m["name"], "Opção": KIND_LABELS[m["kind"]], "Em uso": "sim" if m["active"] else "",
+                   **{RATE_LABELS[k]: v or "" for k, v in m["costs"].items()}} for m in models],
+                 hide_index=True, use_container_width=True)
+    selection_form(models)
+    with st.expander("Cadastrar modelo"):
+        kind = st.selectbox("Opção", list(KIND_LABELS), format_func=KIND_LABELS.get, key="new-model-kind")
+        with st.form("new-model"):
+            name = st.text_input("Nome do modelo (como na API, ex.: gpt-6.2-sol)", key="new-model-name")
+            costs = cost_inputs(kind, {}, "new-model-cost-")
+            create = st.form_submit_button("Cadastrar modelo")
+        if create:
+            try: api.create_model(name, kind, {k: v for k, v in costs.items() if v is not None})
+            except ValueError as exc:
+                st.error(str(exc))
+                return
+            changed("Modelo cadastrado.")
+    by_id = {m["id"]: m for m in models}
+    selected = st.selectbox("Editar ou excluir modelo", list(by_id), index=None, key="edit-model",
+                            format_func=lambda id: f'{by_id[id]["name"]} — {KIND_LABELS[by_id[id]["kind"]]}',
+                            placeholder="Selecione explicitamente")
+    if selected is None:
+        return
+    model = by_id[selected]
+    with st.form(f"edit-model-{selected}"):
+        name = st.text_input("Nome do modelo", value=model["name"], key=f"edit-model-name-{selected}")
+        costs = cost_inputs(model["kind"], model["costs"], f"edit-model-cost-{selected}-")
+        save = st.form_submit_button("Salvar modelo")
     if save:
-        rates = {}
-        for kind, fields in values.items():
-            filled = {rate: value.strip() for rate, value in fields.items() if value.strip()}
-            # Kinds may share a model name; merge instead of overwriting.
-            if filled: rates.setdefault(models[kind], {}).update(filled)
-        try: api.save_pricing_settings(rates, {k: v.strip() for k, v in twilio.items() if v.strip()})
+        try: api.update_model(selected, name, model["kind"], costs)
         except ValueError as exc:
             st.error(str(exc))
             return
-        changed("Custos salvos. Valem para as próximas requisições e ligações.")
+        changed("Modelo salvo.")
+    if model["active"]:
+        st.caption("Este modelo está em uso: escolha outro modelo para a opção antes de excluí-lo.")
+    confirm = st.checkbox("Confirmo a exclusão deste modelo", key=f"delete-model-confirm-{selected}")
+    if st.button("Excluir modelo", disabled=not confirm or model["active"], key=f"delete-model-{selected}"):
+        api.delete_model(selected)
+        changed("Modelo excluído.")
+
+
+def selection_form(models):
+    st.markdown("**Modelo em uso por opção**")
+    st.caption("Trocar o modelo de áudios exige gerar de novo os áudios das mensagens preparadas. Trocar o modelo "
+               "de embeddings deixa os produtos indisponíveis até clicar em \"Atualizar embeddings\" em Produtos.")
+    current = {kind: chosen["id"] for kind, chosen in api.model_selection().items()}
+    names = {m["id"]: m["name"] for m in models}
+    with st.form("model-selection"):
+        chosen = {}
+        for kind, label in KIND_LABELS.items():
+            options = [m["id"] for m in models if m["kind"] == kind]
+            chosen[kind] = st.selectbox(label, options, format_func=names.get, key=f"active-{kind}",
+                                        index=options.index(current[kind]) if current.get(kind) in options else None)
+        save = st.form_submit_button("Salvar modelos em uso")
+    if save:
+        if None in chosen.values():
+            st.error("Escolha um modelo para cada opção.")
+            return
+        api.select_models(chosen["text"], chosen["audio"], chosen["embedding"])
+        changed("Modelos em uso salvos. Valem para as próximas requisições.")
+
+
+def twilio_form():
+    st.subheader("Custos da Twilio (USD)")
+    prices = api.pricing_settings()
+    source = {"settings": "salvos neste painel", "environment": "variável OBSERVABILITY_PRICING_JSON",
+              "none": "nenhum valor configurado"}.get(prices["source"], prices["source"])
+    st.caption(f"Valores em vigor: {source}. Tarifa de chamadas de saída para o país do lead em "
+               "https://www.twilio.com/en-us/voice/pricing. O valor realmente cobrado de cada ligação aparece em "
+               "Histórico, no botão de consulta de cobrança.")
+    with st.form("pricing"):
+        twilio = {rate: st.text_input(label, value=prices["twilio"].get(rate, ""), key=f"price-twilio-{rate}")
+                  for rate, label in TWILIO_FIELDS}
+        save = st.form_submit_button("Salvar custos da Twilio")
+    if save:
+        try: api.save_pricing_settings({k: v.strip() for k, v in twilio.items() if v.strip()})
+        except ValueError as exc:
+            st.error(str(exc))
+            return
+        changed("Custos da Twilio salvos. Valem para as próximas ligações.")
+
+
+def outdated_embeddings(products):
+    """Only products whose vectors came from another embedding model get the update button."""
+    for product in products:
+        if product.get("embeddings_current") is not False:
+            continue
+        st.warning(f'"{product["name"]}" usa embeddings de {product.get("embedding_model") or "um modelo excluído"}. '
+                   "Fica indisponível para mensagens e ligações até atualizar.")
+        if st.button("Atualizar embeddings", key=f'embeddings-{product["id"]}'):
+            api.update_embeddings(product["id"])
+            changed(f'Embeddings de "{product["name"]}" atualizados.')
 
 
 if "notice" in st.session_state:
@@ -311,8 +389,9 @@ if "notice" in st.session_state:
 page = st.sidebar.radio("Seção", ["Produtos", "Leads", "Histórico", "Observabilidade", "Configurações"])
 try:
     if page == "Produtos":
-        editor("products", "Produtos e serviços", [("name", "Nome"), ("description", "Descrição comercial"),
-                                                    ("goal", "Objetivo da ligação (opcional)")])
+        products = editor("products", "Produtos e serviços", [("name", "Nome"), ("description", "Descrição comercial"),
+                                                               ("goal", "Objetivo da ligação (opcional)")])
+        outdated_embeddings(products)
         st.caption("Objetivo: o que a ligação precisa conseguir (vender, obter dados do lead, agendar uma reunião). "
                    "Ele orienta os textos gerados e as respostas do agente, e a chamada só conta como sucesso "
                    "quando o lead aceita esse objetivo.")

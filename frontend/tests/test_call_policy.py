@@ -53,9 +53,9 @@ class FakeAPI:
         self.profile_writes.append((name,voice))
         self.profile.update(agent_name=name,tts_voice=voice)
         return dict(self.profile)
-    def pricing_settings(self):
-        return {'source':'none','version':None,'models':{},'twilio':{},
-                'configured_models':{'chat':'gpt-4o-mini','embedding':'text-embedding-3-small','tts':'tts-1'}}
+    def pricing_settings(self): return {'source':'none','version':None,'twilio':{}}
+    def models(self): return []
+    def model_selection(self): return {}
 
 
 @unittest.skipUnless(importlib.util.find_spec('streamlit'), 'Streamlit image required')
