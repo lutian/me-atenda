@@ -134,11 +134,18 @@ Se a URL pública mudar, atualize `PUBLIC_BASE_URL` no `.env` e recrie o backend
 Abra http://localhost:8501.
 
 1. **Configurações → Agente de voz:** escolha a voz e o nome do agente (por exemplo "Bia") e clique em **Salvar agente**. Em **Configurações** também fica a duração máxima da chamada.
-2. **Produtos → Cadastrar:** informe o nome e a descrição comercial. A descrição é a base que o agente usa para responder (gera embeddings, com custo pequeno).
+2. **Produtos → Cadastrar:** informe o nome e a descrição comercial. A descrição é a base de toda a conversa. A IA gera a partir dela as mensagens preparadas (abertura e apresentação), e durante a ligação o agente busca nela as respostas para o lead. Por isso a descrição precisa ser clara e completa:
+   - **o que é o produto** e para quem ele serve;
+   - **os benefícios e as informações** que o agente pode usar nas respostas (o agente não inventa o que não está escrito);
+   - **o objetivo da ligação**: vender o produto, obter os dados do lead, agendar uma reunião, etc.
+
+   O sistema não tem um campo separado para o objetivo: escreva-o na própria descrição, por exemplo "O objetivo da ligação é agendar uma demonstração de 30 minutos com o responsável técnico". Salvar o produto gera embeddings, com custo pequeno.
 3. **Leads:** cadastre nome e telefone em E.164 (`+5511999999999`), ou importe um JSON/CSV ([formatos](#leads-e-chamada-unitária)).
 4. **Leads → Disparo unitário:** escolha o lead e o produto. Nos campos de mensagens:
    - **Gerar texto com IA** sugere a abertura e a apresentação; revise ou escreva à mão;
    - **Salvar e gerar áudios** grava os textos e gera os áudios ("Alô?", abertura, apresentação e despedida).
+
+   Este passo existe para evitar a demora no início da conversa. Se os áudios fossem gerados durante a ligação, o lead ficaria esperando em silêncio depois de atender, enquanto a voz da apresentação é sintetizada, e poderia desligar. Com os áudios prontos antes de discar, o agente responde na hora e prende a atenção do lead desde o primeiro momento.
 
    Os textos e os áudios ficam salvos para as próximas ligações. Só é preciso gerar de novo quando você muda um texto, a voz ou o nome do agente.
 5. Marque a confirmação de consentimento e clique em **Iniciar UMA ligação**. A conversa aparece em tempo real como chat: o lead à esquerda, o agente à direita.
