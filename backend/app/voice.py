@@ -6,6 +6,7 @@ import binascii
 import json
 import logging
 import re
+import unicodedata
 from starlette.websockets import WebSocketDisconnect
 
 from .openings import NOTICE  # Preserve the existing public export.
@@ -66,6 +67,17 @@ def enqueue(queue, pcm):
     queue.put_nowait(b''.join(pending + [pcm])[-MAX_PCM:])
 
 
+# Greetings a lead repeats while waiting in silence ("Alô? Alô?"). Answering them snowballs.
+FILLERS = {'alo', 'oi', 'ola', 'hello', 'hum', 'hm', 'humm', 'ah', 'eh', 'ei'}
+
+
+def is_filler(text):
+    """True when an utterance carries no content beyond greeting/hesitation words."""
+    plain = unicodedata.normalize('NFKD', text or '').encode('ascii', 'ignore').decode().lower()
+    words = re.findall(r'[a-z]+', plain)
+    return bool(words) and len(words) <= 6 and all(word in FILLERS for word in words)
+
+
 def failure_reason(exc):
     # Own protocol/timeout messages are static; provider errors may carry URLs or data.
     if type(exc) in (ValueError, TimeoutError) and str(exc): return f'{type(exc).__name__}: {str(exc)[:80]}'
@@ -118,12 +130,16 @@ async def session(ws, id, store, providers):
                 await db('append', id, 'user', text)
                 # Completion disables selling, not transcription of accepted audio.
                 if not await can_speak(): continue
+                # Kept in the transcript for audit; never answered (see FILLERS).
+                if is_filler(text): continue
                 embedding = (await providers.embed([text]))[0]
                 context = await db('retrieve', bound['product_id'], embedding)
                 current = await db('get', 'calls', id)
                 if not current['active'] or not await can_speak(): continue
                 offered = [k for k in ('pitch', 'goodbye') if prepared[k] and not (k == 'pitch' and pitched)]
-                result = await providers.answer(current['transcription_json'], context,
+                history = [turn for turn in current['transcription_json']
+                           if not (turn['role'] == 'user' and is_filler(turn['content']))]
+                result = await providers.answer(history, context,
                                                 bound.get('agent_name') or 'Bia', offered)
                 if not await can_speak(): continue
                 script = result.get('script')

@@ -50,3 +50,7 @@ O prompt pede uma única frase de até 20 palavras. Quando a chamada tem apresen
 - `goodbye`: usado em recusa ou contato errado, com `sem_interesse` ou `numero_errado`; sem classificação vira `inconclusivo`. Depois dele a ligação é encerrada.
 
 Um script não oferecido é ignorado, e aí a resposta precisa trazer texto próprio. Sem mensagens preparadas, o prompt manda usar sempre `script: null`.
+
+## "Alô" no meio da conversa
+
+Quando o lead fala só cumprimentos ou hesitações enquanto espera (alô, oi, olá, hello, hum, ah, eh, ei; até 6 palavras, sem diferenciar acentos ou maiúsculas), a fala fica na transcrição para auditoria, mas não recebe resposta e não vai para o LLM. Assim, cada "Alô?" dito durante uma espera não vira um turno novo respondido fora de hora. Uma frase com conteúdo, como "Oi, sim. Alô.", é respondida normalmente.
