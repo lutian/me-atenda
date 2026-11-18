@@ -1,13 +1,13 @@
 # AI Outbound — painel local e agente de voz
 
-Administre produtos, leads e auditoria pelo Streamlit. O backend FastAPI integra Twilio, RAG no PostgreSQL/pgvector, OpenAI (chat/embeddings/TTS) e **faster-whisper local** para STT. Não há campanhas nem loop de discagem: cada chamada exige lead e produto selecionados explicitamente.
+Administre produtos, leads e auditoria pelo Streamlit. O backend FastAPI integra Twilio, RAG no PostgreSQL/pgvector, OpenAI (chat/embeddings/TTS/transcrição) e, como reserva da transcrição, **faster-whisper local**. Não há campanhas nem loop de discagem: cada chamada exige lead e produto selecionados explicitamente.
 
 ## Passo a passo: do clone à primeira ligação
 
 O sistema tem três serviços, todos em Docker:
 
 - **postgres**: guarda os produtos, os leads, as chamadas, as transcrições e os áudios já gerados.
-- **backend** (FastAPI): fala com a Twilio e a OpenAI, e roda o reconhecimento de voz (Whisper) na sua máquina.
+- **backend** (FastAPI): fala com a Twilio e a OpenAI. A fala do lead é transcrita pela OpenAI; se ela falhar, o Whisper local, na sua máquina, transcreve no lugar.
 - **frontend** (Streamlit): o painel em http://localhost:8501.
 
 A Twilio precisa alcançar o backend pela internet para avisar que a ligação foi atendida e para enviar o áudio da conversa. Como o backend roda na sua máquina, o **ngrok** cria uma URL HTTPS pública que encaminha para ele.
@@ -89,7 +89,8 @@ Edite o `.env`:
 | `OPENAI_API_KEY` | chave do passo 2 |
 | `OPENAI_CHAT_MODEL` | modelo de textos inicial (sem a variável, o Compose usa `gpt-4o-mini`); depois pode ser trocado no painel |
 | `OPENAI_TTS_MODEL`, `OPENAI_TTS_VOICE` | `tts-1` e uma voz padrão (`alloy`, `coral`, `shimmer`…); modelo e voz podem ser trocados depois no painel |
-| `WHISPER_*` | deixe `base`, `pt`, `cpu`, `int8` |
+| `OPENAI_TRANSCRIBE_MODEL` | modelo de transcrição inicial (sem a variável, `whisper-1`); depois pode ser trocado no painel |
+| `WHISPER_*` | Whisper local, usado só como reserva: deixe `base`, `pt`, `cpu`, `int8` (`WHISPER_LANGUAGE` também é o idioma enviado à OpenAI) |
 
 A senha do banco vale a partir da primeira inicialização: mudá-la depois no `.env` não altera um banco que já existe.
 
@@ -187,6 +188,7 @@ OPENAI_CHAT_MODEL=gpt-4o-mini
 OPENAI_EMBEDDING_MODEL=text-embedding-3-small
 OPENAI_TTS_MODEL=tts-1
 OPENAI_TTS_VOICE=alloy
+OPENAI_TRANSCRIBE_MODEL=whisper-1
 WHISPER_MODEL=base
 WHISPER_LANGUAGE=pt
 WHISPER_DEVICE=cpu
@@ -198,8 +200,8 @@ WHISPER_COMPUTE_TYPE=int8
 | Banco | Mesmo segredo em `POSTGRES_PASSWORD` e `DATABASE_URL`; use senha aleatória URL-safe ou percent-encode na URL. Alterar as variáveis de configuração não muda a senha de um banco já inicializado. |
 | API administrativa | Chave longa e aleatória compartilhada **apenas entre servidores** backend/frontend via `X-API-Key`; nunca inserir em navegador, links, query strings ou logs. |
 | Twilio | Conta/número com Voice e destino autorizado; callbacks são gerados pelo backend e validados por assinatura. Não exponha o painel no túnel público. |
-| OpenAI | Chat, embeddings e TTS usam rede e têm custo. Modelo de embeddings deve manter 1536 dimensões; não troque sem planejar a migração dos vetores. |
-| Whisper | STT local em CPU/int8 por padrão; modelo `base`, idioma `pt`. O cache persistente fica em `/models/huggingface`. |
+| OpenAI | Chat, embeddings, TTS e transcrição usam rede e têm custo. Modelo de embeddings deve manter 1536 dimensões; não troque sem planejar a migração dos vetores. |
+| Transcrição | Primeiro a OpenAI, com o modelo em uso (`whisper-1` por padrão) e limite de 10 s por fala. Em erro ou timeout, o Whisper local (CPU/int8, modelo `base`, idioma `pt`) transcreve a mesma fala; o log registra `transcription_fallback_local` com o tipo do erro. O cache do modelo local fica em `/models/huggingface`. |
 
 O frontend recebe somente `ADMIN_API_KEY` e a URL interna fixa `http://backend:8000`. Segredos da Twilio/OpenAI e acesso ao banco ficam fora dele. O painel serve áudio como bytes após buscá-lo no servidor, sem repassar a chave ou seguir `audio_url` arbitrária. Redirecionamentos HTTP autenticados são recusados.
 
@@ -410,7 +412,7 @@ A seção **Observabilidade** mostra contagem global de requisições/erros e pe
 |---|---|
 | Horário UTC, `elapsed_ms`, provedor/operação/modelo e `provider_request_id` | Localize a requisição com um ID seguro; `success`, `error` e `cancelled` não são status comerciais da ligação. |
 | Entrada, saída e total de tokens | Soma apenas dos valores conhecidos retornados pelas integrações; cache é subconjunto da entrada, nunca some duas vezes. `unknown_usage_events` informa eventos com uso desconhecido. |
-| TTS / STT | TTS usa caracteres; tokens são n/a. Whisper é local: não se inventa tarifa de provedor STT; CPU/infra continuam fora do subtotal. |
+| TTS / STT | TTS usa caracteres; tokens são n/a. A transcrição na OpenAI usa a duração do áudio (`audio_seconds`) × custo por minuto. Quando o Whisper local responde, aparecem dois eventos: `transcribe / openai` com erro e `transcribe / local`, sem tarifa (CPU/infra ficam fora do subtotal). |
 | `estimated_cost_usd` e `cost_status` | Estimativa USD por evento; resumo `estimated`, `partial`, `unknown` ou `no_usage`. Desconhecido é null, não zero; subtotal parcial não é fatura completa. |
 | `excluded_costs` | Componentes excluídos/desconhecidos, como gravação, armazenamento, Streams, infraestrutura, impostos ou outros adicionais. Não presuma que uma lista curta garante cobertura total. |
 | Conectividade faturada | Campo separado `billed_connectivity`, na moeda nativa do provedor, sem conversão cambial. Não some a cobrança à estimativa de conectividade; seria dupla contagem. |
@@ -424,12 +426,14 @@ A seção **Observabilidade** mostra contagem global de requisições/erros e pe
 | Textos | respostas do agente e rascunhos das mensagens | entrada, entrada em cache e saída, por 1 milhão de tokens |
 | Áudios | voz do agente (TTS) | por 1 milhão de caracteres |
 | Embeddings | busca na descrição do produto | entrada, por 1 milhão de tokens |
+| Transcrição | entender a fala do lead (speech-to-text) | por minuto de áudio |
 
-Os preços estão em https://openai.com/api/pricing. O catálogo inicial usa os valores oficiais consultados em 18/11/2026: `gpt-6.1-sol` e `gpt-6.2-sol` a US$ 2,00 (entrada), 0,10 (cache) e 10,00 (saída); `text-embedding-3-small` a US$ 0,02; `tts-1` a US$ 15,00 por milhão de caracteres. Confira antes de usar, porque os preços mudam.
+Os preços estão em https://openai.com/api/pricing. O catálogo inicial usa os valores oficiais consultados em 18/11/2026: `gpt-6.1-sol` e `gpt-6.2-sol` a US$ 2,00 (entrada), 0,10 (cache) e 10,00 (saída); `text-embedding-3-small` a US$ 0,02; `tts-1` a US$ 15,00 por milhão de caracteres; transcrição por minuto: `whisper-1` e `gpt-4o-transcribe` a US$ 0,006, `gpt-4o-mini-transcribe` a US$ 0,003 e `gpt-transcribe` a US$ 0,0045 (estimativa por minuto publicada pela OpenAI; o modelo inicial em uso é `whisper-1`). Confira antes de usar, porque os preços mudam.
 
-Em **Modelo em uso por opção** você escolhe o modelo de cada opção. As variáveis `OPENAI_CHAT_MODEL`, `OPENAI_TTS_MODEL` e `OPENAI_EMBEDDING_MODEL` do `.env` só definem a escolha inicial; depois vale o que foi salvo no painel. Ao trocar:
+Em **Modelo em uso por opção** você escolhe o modelo de cada opção. As variáveis `OPENAI_CHAT_MODEL`, `OPENAI_TTS_MODEL`, `OPENAI_EMBEDDING_MODEL` e `OPENAI_TRANSCRIBE_MODEL` do `.env` só definem a escolha inicial; depois vale o que foi salvo no painel. Ao trocar:
 
 - **textos:** as próximas respostas e rascunhos já usam o modelo novo;
+- **transcrição:** a próxima fala do lead já usa o modelo novo;
 - **áudios:** os áudios das mensagens preparadas precisam ser gerados de novo (a tela de ligação mostra "não prontas");
 - **embeddings:** nada é recalculado. Cada produto guarda o modelo dos seus embeddings, e os produtos de outro modelo ficam **indisponíveis** (sem rascunho nem ligação) até você clicar em **Atualizar embeddings** em **Produtos**. O botão só aparece nesses produtos. O modelo precisa gerar vetores de 1536 dimensões.
 
@@ -442,7 +446,7 @@ Um modelo em uso não pode ser excluído nem mudar de opção: escolha outro ant
 | Ligação, por minuto | https://www.twilio.com/en-us/voice/pricing: escolha o país do lead (por exemplo Brasil) e use a tarifa de chamadas de saída (*outbound*) para celular ou fixo, conforme o seu público |
 | Detecção de secretária (AMD), por chamada | mesma página, item *Answering Machine Detection* |
 
-O Whisper roda na sua máquina e não tem tarifa de provedor.
+O Whisper local é só a reserva da transcrição: roda na sua máquina e não tem tarifa de provedor.
 
 A tarifa da Twilio é só uma estimativa: ela é cobrada por minuto iniciado e pode variar por operadora de destino. Para ver o valor que a Twilio realmente cobrou numa ligação, use o botão **Consultar cobrança de conectividade na Twilio** na auditoria da chamada ([detalhes](#consultar-cobrança-sem-discar-novamente)). Esse valor aparece separado da estimativa e não é somado a ela.
 
@@ -538,6 +542,6 @@ A abertura da Bia usa síntese de voz; ouvi-la não comprova que o reconheciment
 docker run --rm --network none --entrypoint python me-atenda-backend -B -m unittest discover -s tests -p test_speech_runtime.py -v
 ```
 
-Esse teste não carrega pesos nem comprova transcrição. O modelo Whisper configurado também precisa estar instalado no volume `/models`: o download inicial é uma ação separada, somente com autorização do operador. Antes de testar outra ligação paga, valide o carregamento local e a transcrição de uma amostra sem chamar Twilio ou OpenAI. Falhas nessa etapa aparecem como `transcribe / local` na auditoria da conversa; a aplicação pode encerrar a ligação sem erro na operadora.
+Esse teste não carrega pesos nem comprova transcrição. O modelo Whisper configurado também precisa estar instalado no volume `/models`: o download inicial é uma ação separada, somente com autorização do operador. Antes de testar outra ligação paga, valide o carregamento local e a transcrição de uma amostra sem chamar Twilio ou OpenAI. O Whisper local só é usado quando a transcrição da OpenAI falha; falhas dele aparecem como `transcribe / local` na auditoria da conversa; a aplicação pode encerrar a ligação sem erro na operadora.
 
 Ordem de revisão sugerida: (1) `frontend/client.py`, `frontend/imports.py` e testes; (2) `frontend/app.py` e fluxos de confirmação; (3) Compose, Dockerfiles e esta configuração. Integração real, segurança do proxy e serialização PostgreSQL são verificações independentes, não demonstradas pela suíte frontend.

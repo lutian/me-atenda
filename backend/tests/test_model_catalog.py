@@ -34,10 +34,11 @@ class ModelCatalog(unittest.TestCase):
         models = self.models()
         self.assertEqual({n: (m['kind'], m['active']) for n, m in models.items()},
                          {'gpt-4o-mini': ('text', True), 'tts-1': ('audio', True),
-                          'text-embedding-3-small': ('embedding', True)})
+                          'text-embedding-3-small': ('embedding', True), 'whisper-1': ('transcription', True)})
         self.assertEqual(models['tts-1']['costs'], {'characters_per_million': None})
         self.assertEqual({k: v['name'] for k, v in self.selection().items()},
-                         {'text': 'gpt-4o-mini', 'audio': 'tts-1', 'embedding': 'text-embedding-3-small'})
+                         {'text': 'gpt-4o-mini', 'audio': 'tts-1', 'embedding': 'text-embedding-3-small',
+                          'transcription': 'whisper-1'})
         self.assertEqual(self.client.get('/models').status_code, 401)
 
     def test_create_update_and_delete_models_with_costs(self):
@@ -67,7 +68,19 @@ class ModelCatalog(unittest.TestCase):
                      {'name': 'm', 'kind': 'audio', 'costs': {'output_per_million': '1'}},
                      {'name': 'm', 'kind': 'embedding', 'costs': {}, 'other': 1}):
             self.assertEqual(self.post('/models', body).status_code, 422, body)
-        self.assertEqual(set(self.models()), {'gpt-4o-mini', 'tts-1', 'text-embedding-3-small'})
+        self.assertEqual(set(self.models()), {'gpt-4o-mini', 'tts-1', 'text-embedding-3-small', 'whisper-1'})
+
+    def test_transcription_models_are_priced_per_minute(self):
+        created = self.post('/models', {'name': 'gpt-4o-mini-transcribe', 'kind': 'transcription',
+                                        'costs': {'per_minute': '0.003'}})
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(created.json()['costs'], {'per_minute': '0.003'})
+        self.assertEqual(self.post('/models', {'name': 'x', 'kind': 'transcription',
+                                               'costs': {'input_per_million': '1'}}).status_code, 422)
+        ids = {k: v['id'] for k, v in self.selection().items()}
+        self.assertEqual(self.client.put('/settings/models', json=dict(ids, transcription=created.json()['id']),
+                                         headers=self.headers).status_code, 200)
+        self.assertEqual(self.settings.transcribe_model, 'gpt-4o-mini-transcribe')
 
     def test_model_in_use_cannot_be_deleted_nor_change_kind(self):
         text = self.models()['gpt-4o-mini']['id']
@@ -84,7 +97,8 @@ class ModelCatalog(unittest.TestCase):
                                  headers=self.headers)
         self.assertEqual(result.status_code, 200)
         self.assertEqual({k: v['name'] for k, v in result.json().items()},
-                         {'text': 'gpt-6.2-sol', 'audio': 'tts-1-hd', 'embedding': 'text-embedding-3-small'})
+                         {'text': 'gpt-6.2-sol', 'audio': 'tts-1-hd', 'embedding': 'text-embedding-3-small',
+                          'transcription': 'whisper-1'})  # Omitted transcription keeps the current one.
         self.assertEqual((self.settings.chat_model, self.settings.tts_model), ('gpt-6.2-sol', 'tts-1-hd'))
         # Wrong option or unknown model: nothing changes.
         self.assertEqual(self.client.put('/settings/models', json={'text': hd, 'audio': hd, 'embedding': embedding},

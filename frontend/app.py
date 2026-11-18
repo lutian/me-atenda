@@ -262,13 +262,16 @@ def settings_page():
 
 
 KIND_LABELS = {"text": "Textos (mensagens e respostas)", "audio": "Áudios (voz do agente)",
-               "embedding": "Embeddings (busca na descrição)"}
+               "embedding": "Embeddings (busca na descrição)",
+               "transcription": "Transcrição (fala do lead)"}
 RATE_LABELS = {"input_per_million": "Entrada, por 1 milhão de tokens",
                "cached_input_per_million": "Entrada em cache, por 1 milhão de tokens",
                "output_per_million": "Saída, por 1 milhão de tokens",
-               "characters_per_million": "Por 1 milhão de caracteres"}
+               "characters_per_million": "Por 1 milhão de caracteres",
+               "per_minute": "Por minuto de áudio"}
 KIND_RATES = {"text": ("input_per_million", "cached_input_per_million", "output_per_million"),
-              "embedding": ("input_per_million",), "audio": ("characters_per_million",)}
+              "embedding": ("input_per_million",), "audio": ("characters_per_million",),
+              "transcription": ("per_minute",)}
 TWILIO_FIELDS = [("voice_per_minute", "Ligação, por minuto"), ("amd_per_call", "Detecção de secretária (AMD), por chamada")]
 
 
@@ -348,7 +351,7 @@ def selection_form(models):
         if None in chosen.values():
             st.error("Escolha um modelo para cada opção.")
             return
-        api.select_models(chosen["text"], chosen["audio"], chosen["embedding"])
+        api.select_models(chosen["text"], chosen["audio"], chosen["embedding"], chosen["transcription"])
         changed("Modelos em uso salvos. Valem para as próximas requisições.")
 
 

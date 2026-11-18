@@ -19,7 +19,9 @@ class FakeAPI(base.FakeAPI):
         self.catalog = {1: {'id': 1, 'name': 'gpt-6.1-sol', 'kind': 'text', 'costs': dict(SOL), 'active': True},
                         2: {'id': 2, 'name': 'tts-1', 'kind': 'audio', 'costs': {'characters_per_million': '15.00'}, 'active': True},
                         3: {'id': 3, 'name': 'text-embedding-3-small', 'kind': 'embedding',
-                            'costs': {'input_per_million': '0.02'}, 'active': True}}
+                            'costs': {'input_per_million': '0.02'}, 'active': True},
+                        4: {'id': 4, 'name': 'whisper-1', 'kind': 'transcription',
+                            'costs': {'per_minute': '0.006'}, 'active': True}}
         self.created = []; self.updated = []; self.deleted = []; self.selected = []
     def models(self): return [dict(m) for m in self.catalog.values()]
     def model_selection(self):
@@ -33,9 +35,9 @@ class FakeAPI(base.FakeAPI):
         self.updated.append((id, name, kind, costs)); self.catalog[id].update(name=name, kind=kind, costs=costs)
         return dict(self.catalog[id])
     def delete_model(self, id): self.deleted.append(id); self.catalog.pop(id)
-    def select_models(self, text, audio, embedding):
-        self.selected.append((text, audio, embedding))
-        for m in self.catalog.values(): m['active'] = m['id'] in (text, audio, embedding)
+    def select_models(self, text, audio, embedding, transcription):
+        self.selected.append((text, audio, embedding, transcription))
+        for m in self.catalog.values(): m['active'] = m['id'] in (text, audio, embedding, transcription)
         return self.model_selection()
 
 
@@ -44,7 +46,7 @@ class ClientValidation(unittest.TestCase):
         api = APIClient('http://127.0.0.1:9', 'k')
         for args in (('', 'text', {}), ('bad name!', 'text', {}), ('m', 'video', {}),
                      ('m', 'text', {'input_per_million': '-1'}), ('m', 'text', {'characters_per_million': '1'}),
-                     ('m', 'audio', {'input_per_million': '1'})):
+                     ('m', 'audio', {'input_per_million': '1'}), ('m', 'transcription', {'per_minute': '-1'})):
             with self.assertRaises(ValueError): api.create_model(*args)
         with self.assertRaises(APIError): APIClient._model({'id': 1, 'name': 'x'})
 
@@ -97,6 +99,14 @@ class ModelCatalogUI(unittest.TestCase):
         self.api.create_model('gpt-6.2-sol', 'text', SOL)
         self.app.run()
         self.assertEqual(self.app.selectbox(key='active-text').options, ['gpt-6.1-sol', 'gpt-6.2-sol'])
-        self.app.selectbox(key='active-text').set_value(4)
+        self.assertEqual(self.app.selectbox(key='active-transcription').options, ['whisper-1'])
+        self.app.selectbox(key='active-text').set_value(5)
         self.click('Salvar modelos em uso')
-        self.assertEqual(self.api.selected, [(4, 2, 3)])
+        self.assertEqual(self.api.selected, [(5, 2, 3, 4)])
+
+    def test_transcription_model_is_priced_per_minute(self):
+        self.app.selectbox(key='new-model-kind').set_value('transcription').run()
+        self.app.text_input(key='new-model-name').set_value('gpt-4o-mini-transcribe')
+        self.app.text_input(key='new-model-cost-per_minute').set_value('0.003')
+        self.click('Cadastrar modelo')
+        self.assertEqual(self.api.created, [('gpt-4o-mini-transcribe', 'transcription', {'per_minute': '0.003'})])

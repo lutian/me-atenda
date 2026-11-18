@@ -136,7 +136,7 @@ class Store(AnsweringStore, OpeningStore, AccountingStore):
         from .catalog import ALL_RATES, model_view
         with self.connection() as db:
             rows = db.execute('SELECT m.id,m.name,m.kind,c.input_per_million,c.cached_input_per_million,'
-                              'c.output_per_million,c.characters_per_million,(a.kind IS NOT NULL) AS active '
+                              'c.output_per_million,c.characters_per_million,c.per_minute,(a.kind IS NOT NULL) AS active '
                               'FROM ai_models m LEFT JOIN model_costs c ON c.model_id=m.id '
                               'LEFT JOIN active_models a ON a.model_id=m.id ORDER BY m.kind,m.name').fetchall()
         return [model_view(row, {k: self.rate(row[k]) for k in ALL_RATES}, row['active']) for row in rows]
@@ -151,10 +151,10 @@ class Store(AnsweringStore, OpeningStore, AccountingStore):
         from .catalog import ALL_RATES
         values = [costs.get(k) for k in ALL_RATES]
         db.execute('INSERT INTO model_costs(model_id,input_per_million,cached_input_per_million,output_per_million,'
-                   'characters_per_million) VALUES (%s,%s,%s,%s,%s) ON CONFLICT (model_id) DO UPDATE SET '
+                   'characters_per_million,per_minute) VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT (model_id) DO UPDATE SET '
                    'input_per_million=EXCLUDED.input_per_million,cached_input_per_million=EXCLUDED.cached_input_per_million,'
                    'output_per_million=EXCLUDED.output_per_million,characters_per_million=EXCLUDED.characters_per_million,'
-                   'updated_at=now()', [id] + values)
+                   'per_minute=EXCLUDED.per_minute,updated_at=now()', [id] + values)
 
     def model_create(self, name, kind, costs):
         import psycopg

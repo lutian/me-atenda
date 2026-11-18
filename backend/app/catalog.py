@@ -1,14 +1,17 @@
 """AI model catalog: which rates apply to each option and which Settings field it drives."""
 import re
 
-KINDS = ('text', 'audio', 'embedding')
+KINDS = ('text', 'audio', 'embedding', 'transcription')
 KIND_RATES = {'text': ('input_per_million', 'cached_input_per_million', 'output_per_million'),
               'embedding': ('input_per_million',),
-              'audio': ('characters_per_million',)}
-SETTING_OF = {'text': 'chat_model', 'audio': 'tts_model', 'embedding': 'embedding_model'}
+              'audio': ('characters_per_million',),
+              'transcription': ('per_minute',)}
+SETTING_OF = {'text': 'chat_model', 'audio': 'tts_model', 'embedding': 'embedding_model',
+              'transcription': 'transcribe_model'}
 NAME = re.compile(r'[A-Za-z0-9_.:/-]{1,120}')
 RATE = re.compile(r'\d{1,18}(?:\.\d{1,18})?')
-ALL_RATES = ('input_per_million', 'cached_input_per_million', 'output_per_million', 'characters_per_million')
+ALL_RATES = ('input_per_million', 'cached_input_per_million', 'output_per_million', 'characters_per_million',
+             'per_minute')
 
 
 def valid_costs(kind, costs):

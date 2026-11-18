@@ -35,6 +35,9 @@ class CallCreationRejected(Exception):
         super().__init__(self.outcome)
 
 
+STT_TIMEOUT = 10  # Seconds before falling back to the local Whisper.
+
+
 class Providers:
     def __init__(self, settings):
         self.s = settings
@@ -149,8 +152,32 @@ class Providers:
                                                beam_size=1, vad_filter=True)
         return ' '.join(segment.text.strip() for segment in segments).strip()[:8000]
 
-    @instrument('transcribe', 'local', 'whisper_model')
     async def transcribe(self, pcm):
+        """OpenAI transcription with the model in use; the local Whisper answers when it fails."""
+        try: return await self._transcribe_openai(pcm)
+        except asyncio.CancelledError: raise
+        except Exception as exc:
+            # Type only: provider messages can echo request details.
+            logging.getLogger(__name__).warning('transcription_fallback_local %s', type(exc).__name__)
+            return await self._transcribe_local(pcm)
+
+    @instrument('transcribe', 'openai', 'transcribe_model')
+    async def _transcribe_openai(self, pcm):
+        import io
+        import wave
+        buffer = io.BytesIO()
+        with wave.open(buffer, 'wb') as wav:
+            wav.setnchannels(1); wav.setsampwidth(2); wav.setframerate(16000); wav.writeframes(pcm)
+        # A short timeout keeps the conversation moving: on timeout the local model answers.
+        result = await self.ai.audio.transcriptions.create(
+            model=self.s.transcribe_model, file=('speech.wav', buffer.getvalue(), 'audio/wav'),
+            language=self.s.whisper_language, timeout=STT_TIMEOUT)
+        text = getattr(result, 'text', None)
+        if not isinstance(text, str): raise ValueError('invalid transcription')
+        return text.strip()[:8000]
+
+    @instrument('transcribe', 'local', 'whisper_model')
+    async def _transcribe_local(self, pcm):
         # No event-loop inference. Lock serializes model loading/inference across sessions.
         await self._stt_lock.acquire()
         job = asyncio.create_task(asyncio.to_thread(self._transcribe, pcm))

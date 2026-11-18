@@ -19,7 +19,8 @@ ERRORS = {'interrupted': 'Operation did not finalize', 'cancelled': 'Operation c
           'billing_invalid': 'Invalid connectivity charge', 'accounting_error': 'Accounting unavailable'}
 EXCLUDED = ['recording', 'storage', 'streams', 'infrastructure', 'taxes',
             'connectivity estimate uses whole-minute ceiling; destination/carrier rates may differ']
-RATE_KEYS = {'input_per_million', 'cached_input_per_million', 'output_per_million', 'characters_per_million'}
+RATE_KEYS = {'input_per_million', 'cached_input_per_million', 'output_per_million', 'characters_per_million',
+             'per_minute'}
 # Supported native billing units, not a currency conversion table.
 CURRENCIES = {'USD', 'EUR', 'GBP', 'BRL', 'CAD', 'AUD', 'JPY', 'INR', 'MXN', 'CHF', 'ZAR', 'SGD', 'HKD', 'SEK', 'NOK', 'DKK', 'NZD', 'PLN'}
 
@@ -103,6 +104,10 @@ def estimate(event):
     if (operation == 'speak' and event.get('response_received') and
             event['characters'] is not None and 'characters_per_million' in rates):
         return decimal_string(Decimal(event['characters']) * Decimal(rates['characters_per_million']) / Decimal(1000000))
+    # Provider transcription is billed by audio duration, not tokens (estimated cost per minute).
+    if (operation == 'transcribe' and event['status'] == 'success' and event.get('audio_seconds') is not None
+            and 'per_minute' in rates):
+        return decimal_string(Decimal(str(event['audio_seconds'])) * Decimal(rates['per_minute']) / Decimal(60))
     return None
 
 
@@ -116,6 +121,8 @@ def instrument(operation, provider, model_attr=None):
             model = getattr(self.s, model_attr) if model_attr else None
             event = observer.event(call_id, provider, operation, model)
             if operation == 'speak': event['characters'] = len(args[0][:1800])
+            # 16 kHz mono 16-bit PCM: 32000 bytes per second.
+            if operation == 'transcribe': event['audio_seconds'] = round(len(args[0]) / 32000, 3)
             # A durable interrupted marker precedes any external side effect.
             id = await asyncio.to_thread(observer.store.event_start, event)
             token = CURRENT.set(event)
@@ -167,7 +174,8 @@ class Recorder:
                     error_code='interrupted', error_message=ERRORS['interrupted'], provider_request_id=None,
                     input_tokens=None, output_tokens=None, cached_input_tokens=None, total_tokens=None,
                     characters=None, estimated_cost_usd=None,
-                    cost_status='unknown' if operation in TOKEN_OPS | {'speak', 'dial'} else 'not_applicable',
+                    cost_status='unknown' if operation in TOKEN_OPS | {'speak', 'dial'}
+                    or (operation, provider) == ('transcribe', 'openai') else 'not_applicable',
                     pricing_snapshot=snapshot)
 
 

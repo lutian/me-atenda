@@ -24,6 +24,9 @@ class ModelCatalogPostgreSQL(unittest.TestCase):
         self.assertEqual(models['text-embedding-3-small']['costs'], {'input_per_million': '0.02'})
         self.assertEqual(models['tts-1']['costs'], {'characters_per_million': '15.00'})
         self.assertEqual(models['gpt-6.2-sol']['kind'], 'text')
+        self.assertEqual(models['whisper-1']['costs'], {'per_minute': '0.006'})
+        self.assertEqual(models['gpt-4o-mini-transcribe']['costs'], {'per_minute': '0.003'})
+        self.assertEqual(self.client.get('/settings/models', headers=self.headers).json()['transcription']['name'], 'whisper-1')
 
     def test_selection_restart_and_deleted_model_is_not_reseeded(self):
         models = self.models()

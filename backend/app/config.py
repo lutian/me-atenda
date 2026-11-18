@@ -17,6 +17,7 @@ class Settings:
     embedding_model: str = 'text-embedding-3-small'
     tts_model: str = 'tts-1'
     tts_voice: str = 'alloy'
+    transcribe_model: str = 'whisper-1'
     whisper_model: str = 'base'
     whisper_language: str = 'pt'
     whisper_device: str = 'cpu'
@@ -31,7 +32,8 @@ class Settings:
                  'twilio_token': 'TWILIO_AUTH_TOKEN', 'twilio_phone': 'TWILIO_PHONE_NUMBER',
                  'openai_key': 'OPENAI_API_KEY', 'chat_model': 'OPENAI_CHAT_MODEL',
                  'embedding_model': 'OPENAI_EMBEDDING_MODEL', 'tts_model': 'OPENAI_TTS_MODEL',
-                 'tts_voice': 'OPENAI_TTS_VOICE', 'whisper_model': 'WHISPER_MODEL',
+                 'tts_voice': 'OPENAI_TTS_VOICE', 'transcribe_model': 'OPENAI_TRANSCRIBE_MODEL',
+                 'whisper_model': 'WHISPER_MODEL',
                  'whisper_language': 'WHISPER_LANGUAGE', 'whisper_device': 'WHISPER_DEVICE',
                  'whisper_compute_type': 'WHISPER_COMPUTE_TYPE'}
         value = cls(**{key: os.environ[name] for key, name in names.items() if name in os.environ})

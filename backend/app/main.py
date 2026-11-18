@@ -96,6 +96,7 @@ class ModelSelection(BaseModel):
     text: int
     audio: int
     embedding: int
+    transcription: Optional[int] = None  # Omitted keeps the current transcription model.
 
 
 class Dial(BaseModel):
@@ -253,7 +254,7 @@ def create_app(settings=None, store=None, providers=None):
     @app.put('/settings/models', dependencies=[Depends(admin)])
     async def select_models(data: ModelSelection):
         catalog = {m['id']: m for m in await run('models')}
-        mapping = data.model_dump()
+        mapping = data.model_dump(exclude_none=True)
         for kind, id in mapping.items():
             if id not in catalog: raise HTTPException(404, 'Model not found')
             if catalog[id]['kind'] != kind: raise HTTPException(422, 'Model does not belong to this option')

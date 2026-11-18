@@ -14,7 +14,8 @@ MESSAGE_FIELDS = ('opening', 'pitch', 'goodbye')
 RATE = re.compile(r'\d{1,18}(?:\.\d{1,18})?')
 MODEL_NAME = re.compile(r'[A-Za-z0-9_.:/-]{1,120}')
 KIND_RATES = {'text': ('input_per_million', 'cached_input_per_million', 'output_per_million'),
-              'embedding': ('input_per_million',), 'audio': ('characters_per_million',)}
+              'embedding': ('input_per_million',), 'audio': ('characters_per_million',),
+              'transcription': ('per_minute',)}
 
 
 class APIError(Exception):
@@ -159,9 +160,10 @@ class APIClient:
     def model_selection(self):
         return self._selection(self._request('GET', '/settings/models'))
 
-    def select_models(self, text, audio, embedding):
+    def select_models(self, text, audio, embedding, transcription):
         return self._selection(self._request('PUT', '/settings/models', {
-            'text': self._id(text), 'audio': self._id(audio), 'embedding': self._id(embedding)}))
+            'text': self._id(text), 'audio': self._id(audio), 'embedding': self._id(embedding),
+            'transcription': self._id(transcription)}))
 
     def update_embeddings(self, product_id):
         # Embeds the product description again with the model in use.
