@@ -41,3 +41,12 @@ Em **Leads → Disparo unitário**, depois de escolher o produto:
 3. **Iniciar UMA ligação** só fica habilitado quando `GET /products/{id}/messages` responde `ready: true`.
 
 Trocar a voz ou o nome do agente faz `ready` voltar a `false`, porque os áudios são indexados por texto e voz. Editar o produto apaga os textos, que precisam ser revisados de novo. Se a síntese falhar, os textos ficam salvos, `ready` continua `false` e vale a regra de reconciliação manual do cache. A API ainda aceita discar sem mensagens preparadas, para manter o contrato de `POST /calls`; nesse caso a chamada não tem apresentação nem despedida prontas.
+
+## Respostas curtas e mensagens preparadas na conversa
+
+O prompt pede uma única frase de até 20 palavras. Quando a chamada tem apresentação e despedida preparadas, o modelo pode responder `"script": "pitch"` ou `"script": "goodbye"` em vez de texto. Nesse caso a chamada toca o áudio gravado, sem esperar o TTS:
+
+- `pitch`: oferecido uma vez só, quando a pessoa aceita conversar;
+- `goodbye`: usado em recusa ou contato errado, com `sem_interesse` ou `numero_errado`; sem classificação vira `inconclusivo`. Depois dele a ligação é encerrada.
+
+Um script não oferecido é ignorado, e aí a resposta precisa trazer texto próprio. Sem mensagens preparadas, o prompt manda usar sempre `script: null`.

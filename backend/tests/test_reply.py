@@ -49,7 +49,7 @@ class ReplyWire(unittest.IsolatedAsyncioTestCase):
                 try:
                     result = await provider.answer(
                         [{'role': 'user', 'content': 'Pode apresentar.'}], 'Teste')
-                    self.assertEqual(result, {'text': 'Vamos conversar?', 'outcome': None})
+                    self.assertEqual(result, {'text': 'Vamos conversar?', 'outcome': None, 'script': None})
                     self.assertEqual(provider.s.chat_model, model)
                     self.assertEqual(provider.ai.max_retries, 0)
                 finally:
@@ -76,7 +76,7 @@ class ActiveReply(unittest.TestCase):
         def retrieve(product_id, vector):
             trace.append('retrieve')
             return 'Produto fictício'
-        async def answer(history, context, agent_name="Bia"):
+        async def answer(history, context, agent_name="Bia", scripts=()):
             trace.append('answer')
             return await reply.answer(history, context)
         async def speak(text, voice=None):

@@ -100,12 +100,16 @@ async def session(ws, id, store, providers):
                                 'media': {'payload': base64.b64encode(audio[offset:offset+160]).decode()}})
             await asyncio.sleep(0.02)
 
+    def padded(audio):
+        # Complete the last cached frame with mu-law silence; live replies are unchanged.
+        return audio + b'\xff' * (-len(audio) % 160)
+
     async def conversation():
         nonlocal draining
         text, audio = await db('opening_intro', id)
-        # Complete the last cached frame with mu-law silence; live replies are unchanged.
-        audio += b'\xff' * (-len(audio) % 160)
-        await output(text, audio)
+        await output(text, padded(audio))
+        prepared = await db('opening_scripts', id)
+        pitched = False
         while True:
             pcm = await queue.get()
             try:
@@ -118,10 +122,16 @@ async def session(ws, id, store, providers):
                 context = await db('retrieve', bound['product_id'], embedding)
                 current = await db('get', 'calls', id)
                 if not current['active'] or not await can_speak(): continue
+                offered = [k for k in ('pitch', 'goodbye') if prepared[k] and not (k == 'pitch' and pitched)]
                 result = await providers.answer(current['transcription_json'], context,
-                                                bound.get('agent_name') or 'Bia')
+                                                bound.get('agent_name') or 'Bia', offered)
                 if not await can_speak(): continue
-                await output(result['text'])
+                script = result.get('script')
+                if script in offered:
+                    # Prepared audio: no live synthesis latency.
+                    pitched = pitched or script == 'pitch'
+                    await output(prepared[script][0], padded(prepared[script][1]))
+                else: await output(result['text'])
                 if result['outcome']:
                     await db('outcome', id, result['outcome'])
                     draining = True
