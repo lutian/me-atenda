@@ -1,0 +1,5 @@
+# This project selects Coral without storing or editing personal credentials.
+services:
+  backend:
+    environment:
+      OPENAI_TTS_VOICE: coral

@@ -10,6 +10,20 @@ Ao atender, a Twilio executa o áudio genérico sem aguardar fala do lead nem AM
 
 O gate espera em passos de um segundo, com prazo de 35 segundos desde a emissão inicial e limite finito de consultas. Retentativas não reiniciam o prazo nem repetem o “Alô?”. Máquina, fax, desconhecido e expiração não recebem apresentação. Apenas o callback terminal libera a chamada ativa.
 
+## Voz Coral
+
+O projeto seleciona `coral` em `docker-compose.override.yml`, sem editar credenciais pessoais nem trocar o modelo TTS. O Compose carrega esse arquivo automaticamente nos comandos habituais, como `docker compose up -d --no-deps --no-build backend`. O valor tem precedência sobre `OPENAI_TTS_VOICE` do arquivo de ambiente. Para escolher outra voz, altere o valor no override; se usar `-f` explicitamente, inclua também o arquivo de override.
+
+O cache diferencia a voz: áudio Alloy não é reutilizado como Coral. A primeira chamada explícita com uma combinação ainda não preparada pode gerar novo áudio e consumo de TTS; isso não ocorre no startup ou em consultas GET. Não é necessário apagar o cache antigo. A troca de voz não garante menor latência nem corrige reconhecimento de fala.
+
+A [documentação oficial da OpenAI](https://developers.openai.com/api/docs/guides/text-to-speech#voice-options) lista Coral para `tts-1`, `tts-1-hd` e `gpt-4o-mini-tts`. Compatibilidade local não comprova a qualidade real da voz; não fazemos geração paga de diagnóstico sem autorização.
+
+Validação da seleção e de que nenhuma outra configuração foi alterada, usando apenas valores sintéticos e sem carregar o arquivo de ambiente pessoal:
+
+```sh
+python3 -B -m unittest discover -s tests -p test_compose_voice.py -v
+```
+
 ## Exposição pública mínima
 
 | Rota | Controle |
