@@ -72,7 +72,7 @@ class Answering(unittest.TestCase):
             with self.assertRaises(WebSocketDisconnect) as closed: ws.receive_json()
             self.assertEqual(closed.exception.code, 1000)
         self.assertEqual(before[0]['transcription_json'], [
-            {'role':'assistant','content':fixtures.NOTICE.format(product_name='Produto')}])
+            {'role':'assistant','content':fixtures.NOTICE.format(agent_name='Bia', product_name='Produto')}])
 
     def test_expired_human_cannot_claim_stream(self):
         from starlette.websockets import WebSocketDisconnect
@@ -195,7 +195,7 @@ class Answering(unittest.TestCase):
         cached = self.client.get(path, headers={'If-None-Match':etag})
         self.assertEqual((cached.status_code,cached.content), (304,b''))
         from app.openings import identity, NOTICE
-        intro = identity(NOTICE.format(product_name='Produto'), self.settings)
+        intro = identity(NOTICE.format(agent_name='Bia', product_name='Produto'), self.settings)
         for digest in (intro,'0'*64,'../recordings','UPPER','a'*63):
             self.assertEqual(self.client.get('/media/hello/'+digest+'.wav').status_code, 404)
         self.assertEqual(self.client.get(path+'?text=secret').status_code, 404)

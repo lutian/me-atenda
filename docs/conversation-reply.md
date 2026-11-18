@@ -25,3 +25,9 @@ Toda `falha_tecnica` do stream registra `media_stream_failed <tipo>` no log. Men
 Na inicialização, o backend carrega o modelo Whisper em segundo plano. Assim, a primeira transcrição não paga cerca de 9 segundos de carga. Se a carga falhar, o log registra `whisper_warmup_failed <tipo>` e o modelo é carregado na primeira fala, como antes.
 
 As respostas não reapresentam a Bia nem repetem o que a abertura já disse, a menos que o cliente pergunte.
+
+## Voz e nome do agente
+
+Em **Configurações → Agente de voz** o operador escolhe a voz do TTS e o nome do agente (padrão: Bia). A lista vem de `GET /settings/agent` e depende do modelo: `tts-1`/`tts-1-hd` aceitam alloy, ash, coral, echo, fable, onyx, nova, sage e shimmer; os modelos mais novos aceitam também ballad, verse, marin e cedar. Sem escolha salva, vale `OPENAI_TTS_VOICE`.
+
+`PATCH /settings/agent` exige `agent_name` (1 a 40 caracteres) e `tts_voice` da lista. Cada chamada registra o nome e a voz no momento da reserva. Mudanças posteriores valem só para as próximas chamadas; a abertura, o prompt e as respostas ao vivo usam o registro da chamada. Como o áudio preparado é indexado por texto e voz, trocar nome ou voz gera áudios novos.

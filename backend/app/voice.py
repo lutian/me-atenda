@@ -92,7 +92,7 @@ async def session(ws, id, store, providers):
     async def output(text, audio=None):
         if not await can_speak(): return
         await db('append', id, 'assistant', text)
-        if audio is None: audio = await providers.speak(text)
+        if audio is None: audio = await providers.speak(text, bound.get('tts_voice'))
         if not await can_speak(): return
         for offset in range(0, len(audio), 160):
             if disconnected or draining or done.is_set(): return
@@ -118,7 +118,8 @@ async def session(ws, id, store, providers):
                 context = await db('retrieve', bound['product_id'], embedding)
                 current = await db('get', 'calls', id)
                 if not current['active'] or not await can_speak(): continue
-                result = await providers.answer(current['transcription_json'], context)
+                result = await providers.answer(current['transcription_json'], context,
+                                                bound.get('agent_name') or 'Bia')
                 if not await can_speak(): continue
                 await output(result['text'])
                 if result['outcome']:

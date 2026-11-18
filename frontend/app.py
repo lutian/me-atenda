@@ -165,6 +165,22 @@ def settings_page():
     if save:
         api.save_call_policy(seconds)
         changed("Limite de duração salvo. Será aplicado às próximas chamadas.")
+    st.subheader("Agente de voz")
+    agent = api.agent_profile()
+    st.caption("Escolha um nome coerente com a voz (por exemplo, um nome masculino para uma voz masculina).")
+    st.caption("Mudar nome ou voz exige gerar as mensagens preparadas de novo antes da próxima ligação.")
+    with st.form("agent-profile"):
+        voices = agent["voices"]
+        voice = st.selectbox("Voz do TTS", voices, key="agent-voice",
+                             index=voices.index(agent["tts_voice"]) if agent["tts_voice"] in voices else None)
+        name = st.text_input("Nome do agente", value=agent["agent_name"], max_chars=40, key="agent-name")
+        save_agent = st.form_submit_button("Salvar agente")
+    if save_agent:
+        try: api.save_agent_profile(name, voice)
+        except ValueError as exc:
+            st.error(str(exc))
+            return
+        changed("Agente salvo. Será aplicado às próximas chamadas.")
 
 
 if "notice" in st.session_state:

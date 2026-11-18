@@ -70,6 +70,26 @@ class APIClient:
         return self._call_policy(self._request('PATCH', '/settings/calls',
                                              {'max_duration_seconds': seconds}))
 
+    @staticmethod
+    def _agent_profile(data):
+        if not isinstance(data, dict): raise APIError('Backend returned an invalid agent profile.')
+        name, voice, voices = data.get('agent_name'), data.get('tts_voice'), data.get('voices')
+        if (not isinstance(name, str) or not isinstance(voice, str) or not isinstance(voices, list)
+                or not all(isinstance(v, str) for v in voices)):
+            raise APIError('Backend returned an invalid agent profile.')
+        return {'agent_name': name, 'tts_voice': voice, 'voices': voices}
+
+    def agent_profile(self):
+        return self._agent_profile(self._request('GET', '/settings/agent'))
+
+    def save_agent_profile(self, name, voice):
+        if not isinstance(name, str) or not 1 <= len(name.strip()) <= 40:
+            raise ValueError('Agent name must have 1 to 40 characters.')
+        if not isinstance(voice, str) or not voice:
+            raise ValueError('Select a voice.')
+        return self._agent_profile(self._request('PATCH', '/settings/agent',
+                                                 {'agent_name': name.strip(), 'tts_voice': voice}))
+
     def list(self, resource):
         return self._request("GET", "/" + self._resource(resource))
 

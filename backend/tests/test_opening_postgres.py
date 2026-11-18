@@ -18,7 +18,7 @@ class Openings(unittest.TestCase):
 
     def track(self):
         self.spoken = []
-        async def speak(text):
+        async def speak(text, voice=None):
             self.spoken.append(text)
             return b'\xff' * 320
         self.provider.speak = speak
@@ -69,7 +69,7 @@ class Openings(unittest.TestCase):
 
     def test_two_apps_cold_exclusion_and_no_dial_before_ready(self):
         entered = threading.Event(); release = threading.Event(); spoken = []
-        async def speak(text):
+        async def speak(text, voice=None):
             spoken.append(text); entered.set()
             if not await asyncio.to_thread(release.wait, 3): raise TimeoutError()
             self.assertEqual(self.provider.dials, [])
@@ -92,7 +92,7 @@ class Openings(unittest.TestCase):
         for action in ('edit', 'delete'):
             with self.subTest(action=action):
                 entered = threading.Event(); release = threading.Event()
-                async def speak(text):
+                async def speak(text, voice=None):
                     entered.set()
                     await asyncio.to_thread(release.wait, 3)
                     return b'\xff'*160
@@ -115,7 +115,7 @@ class Openings(unittest.TestCase):
                 self.track()
                 # Different voice gives each attempt an independent identity.
                 self.settings.tts_voice = failure
-                async def speak(text):
+                async def speak(text, voice=None):
                     self.spoken.append(text)
                     if failure == 'provider': raise OSError('private detail')
                     return b'' if failure == 'empty' else b'x'*720001 if failure == 'large' else b'x'*160

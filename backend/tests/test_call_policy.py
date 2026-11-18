@@ -75,7 +75,7 @@ class Policy(unittest.TestCase):
 
     def test_policy_changed_during_preparation_applies_at_reservation(self):
         entered,release=threading.Event(),threading.Event()
-        async def speak(text):
+        async def speak(text, voice=None):
             entered.set()
             if not await asyncio.to_thread(release.wait,4): raise AssertionError('speech not released')
             return b'\xff'*160

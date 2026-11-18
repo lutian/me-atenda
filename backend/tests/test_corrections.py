@@ -85,10 +85,10 @@ class Corrections(unittest.TestCase):
                         if not await asyncio.to_thread(release.wait, 15): raise TimeoutError('test release missing')
                     transcribed.append(len(pcm))
                     return 'utterance ' + str(len(transcribed))
-                async def answer(history, context):
+                async def answer(history, context, agent_name="Bia"):
                     sales.append(history)
                     return {'text': 'unexpected sales reply', 'outcome': None}
-                async def speak(text):
+                async def speak(text, voice=None):
                     speech.append(text)
                     return b'\xff'*160
                 self.provider.transcribe = transcribe

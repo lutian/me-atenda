@@ -8,7 +8,7 @@ from typing import Optional
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, WebSocket
 from pydantic import BaseModel, ConfigDict, Field
 from .config import Settings
-from .providers import CallCreationRejected, Providers
+from .providers import CallCreationRejected, Providers, voices
 from .observability import Recorder, billed_empty, call_scope
 from .security import public_url, signature_valid, websocket_signature_valid
 from .store import Store
@@ -46,6 +46,12 @@ class LeadPatch(BaseModel):
 class CallPolicy(BaseModel):
     model_config = ConfigDict(extra='forbid')
     max_duration_seconds: int = Field(strict=True, ge=1, le=14400)
+
+
+class AgentProfile(BaseModel):
+    model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
+    agent_name: str = Field(min_length=1, max_length=40)
+    tts_voice: str = Field(min_length=1, max_length=20)
 
 
 class Dial(BaseModel):
@@ -112,6 +118,18 @@ def create_app(settings=None, store=None, providers=None):
     @app.patch('/settings/calls', dependencies=[Depends(admin)])
     async def save_call_policy(data: CallPolicy):
         return await run('save_call_policy', data.max_duration_seconds)
+
+    def profile_view(row):
+        return {'agent_name': row['agent_name'], 'tts_voice': row['tts_voice'] or s.tts_voice,
+                'voices': voices(s.tts_model)}
+
+    @app.get('/settings/agent', dependencies=[Depends(admin)])
+    async def agent_profile(): return profile_view(await run('agent_profile'))
+
+    @app.patch('/settings/agent', dependencies=[Depends(admin)])
+    async def save_agent_profile(data: AgentProfile):
+        if data.tts_voice not in voices(s.tts_model): raise HTTPException(422, 'Voice not supported by TTS model')
+        return profile_view(await run('save_agent_profile', data.agent_name, data.tts_voice))
 
     @app.get('/products', dependencies=[Depends(admin)])
     async def products(): return await run('list', 'products')

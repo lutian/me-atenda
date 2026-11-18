@@ -1,4 +1,5 @@
 """Public-interface offline contract checks; no provider calls."""
+import audioop
 import base64
 import hashlib
 import hmac
@@ -9,6 +10,9 @@ from fastapi.testclient import TestClient
 from app.main import create_app
 from app.config import Settings
 from app.voice import NOTICE
+
+
+def voiced_frame(): return audioop.lin2ulaw(b'\x00\x20' * 160, 2)
 
 
 class MemoryStore:
@@ -23,6 +27,7 @@ class MemoryStore:
         self.openings = {}; self.pins = {}; self.preparing = threading.Lock()
         self.answering = {}; self.answer_lock = threading.Lock()
         self.max_duration_seconds = 180
+        self.profile = {'agent_name': 'Bia', 'tts_voice': None}
     def preparation_guard(self):
         if not self.preparing.acquire(blocking=False): raise ValueError('Speech preparation busy')
         return SimpleNamespace(close=self.preparing.release)
@@ -94,15 +99,20 @@ class MemoryStore:
     def save_call_policy(self, seconds):
         self.max_duration_seconds = seconds
         return self.call_policy()
-    def reserve(self, lead_id, product_id, opening=None):
+    def agent_profile(self): return dict(self.profile)
+    def save_agent_profile(self, name, voice):
+        self.profile = {'agent_name': name, 'tts_voice': voice}
+        return self.agent_profile()
+    def reserve(self, lead_id, product_id, opening=None, profile=None):
         self.get('leads', lead_id); product = self.get('products', product_id)
         if opening and opening[0] != product['name']: raise ValueError('Spoken product changed')
+        if profile is not None and profile != self.profile: raise ValueError('Agent profile changed')
         if any(c['active'] for c in self.calls.values()): raise ValueError('active call')
         id = len(self.calls) + 1
         self.calls[id] = dict(id=id, lead_id=lead_id, product_id=product_id,
             status_final='ligando', active=True, human=False, sid=None, stream_sid=None,
             duration_seconds=0, recording_status='pending', transcription_json=[], audio=None,
-            max_duration_seconds=self.max_duration_seconds)
+            max_duration_seconds=self.max_duration_seconds, **self.profile)
         if opening: self.pins[id] = opening
         return dict(self.calls[id])
     def audio(self, id): return self.calls[id]['audio']
@@ -146,8 +156,8 @@ class Providers:
     async def download(self, sid): self.downloads.append(sid); return b'RIFFaudio'
     async def hangup(self, sid): self.stopped.append(sid)
     async def transcribe(self, pcm): return 'Tenho interesse'
-    async def answer(self, history, context): return {'text': 'Vamos conversar?', 'outcome': None}
-    async def speak(self, text): return b'\xff' * 160
+    async def answer(self, history, context, agent_name="Bia"): return {'text': 'Vamos conversar?', 'outcome': None}
+    async def speak(self, text, voice=None): return b'\xff' * 160
 
 
 class API(unittest.TestCase):

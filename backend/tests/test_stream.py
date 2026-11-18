@@ -52,7 +52,7 @@ class Media(unittest.TestCase):
                     'gostaria de apresentar para vocês o nosso produto. É com você que posso falar?')
         spoken = []
         original_speak = self.provider.speak
-        async def speak(text):
+        async def speak(text, voice=None):
             spoken.append(text)
             return await original_speak(text)
         self.provider.speak = speak

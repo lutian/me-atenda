@@ -119,7 +119,21 @@ class Store(AnsweringStore, OpeningStore, AccountingStore):
             if not row: raise RuntimeError('Call policy missing')
             return row
 
-    def reserve(self, lead_id, product_id, opening=None):
+    def agent_profile(self):
+        with self.connection() as db:
+            row = db.execute('SELECT agent_name,tts_voice FROM call_policy WHERE id=TRUE').fetchone()
+            if not row: raise RuntimeError('Call policy missing')
+            return row
+
+    def save_agent_profile(self, name, voice):
+        if not isinstance(name, str) or not 1 <= len(name) <= 40: raise ValueError('Invalid agent name')
+        with self.connection() as db:
+            row = db.execute('UPDATE call_policy SET agent_name=%s,tts_voice=%s WHERE id=TRUE '
+                             'RETURNING agent_name,tts_voice', (name, voice)).fetchone()
+            if not row: raise RuntimeError('Call policy missing')
+            return row
+
+    def reserve(self, lead_id, product_id, opening=None, profile=None):
         from psycopg.errors import UniqueViolation, ForeignKeyViolation
         try:
             with self.connection() as db:
@@ -128,11 +142,16 @@ class Store(AnsweringStore, OpeningStore, AccountingStore):
                     lead = db.execute('SELECT id FROM leads WHERE id=%s FOR UPDATE', (lead_id,)).fetchone()
                     if not product or not lead: raise LookupError('not found')
                     if product['name'] != opening[0]: raise ValueError('Spoken product changed; dial not attempted')
-                policy = db.execute('SELECT max_duration_seconds FROM call_policy WHERE id=TRUE FOR SHARE').fetchone()
+                policy = db.execute('SELECT max_duration_seconds,agent_name,tts_voice FROM call_policy '
+                                    'WHERE id=TRUE FOR SHARE').fetchone()
                 if not policy: raise RuntimeError('Call policy missing')
-                row = db.execute('INSERT INTO calls(lead_id,product_id,max_duration_seconds) '
-                                 'VALUES (%s,%s,%s) RETURNING *',
-                                 (lead_id, product_id, policy['max_duration_seconds'])).fetchone()
+                # Prepared speech used this identity; a concurrent change must not mismatch it.
+                if profile is not None and profile != {k: policy[k] for k in ('agent_name', 'tts_voice')}:
+                    raise ValueError('Agent profile changed; dial not attempted')
+                row = db.execute('INSERT INTO calls(lead_id,product_id,max_duration_seconds,agent_name,tts_voice) '
+                                 'VALUES (%s,%s,%s,%s,%s) RETURNING *',
+                                 (lead_id, product_id, policy['max_duration_seconds'],
+                                  policy['agent_name'], policy['tts_voice'])).fetchone()
                 db.execute("UPDATE leads SET status='ligando' WHERE id=%s", (lead_id,))
                 if opening:
                     db.execute('INSERT INTO call_openings(call_id,hello,intro) VALUES (%s,%s,%s)',

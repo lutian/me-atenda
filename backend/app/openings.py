@@ -3,15 +3,15 @@ import asyncio
 import hashlib
 import json
 
-NOTICE = ('Olá, meu nome é Bia, sou Representante de {product_name}, gostaria de apresentar '
+NOTICE = ('Olá, meu nome é {agent_name}, sou Representante de {product_name}, gostaria de apresentar '
           'para vocês o nosso produto. É com você que posso falar?')
 HELLO = 'Alô?'
 FORMAT = 'raw-mulaw-8000-mono-v1'
 PREP_SECONDS = 20
 
 
-def identity(text, settings):
-    return hashlib.sha256(json.dumps([text,settings.tts_model,settings.tts_voice,FORMAT],
+def identity(text, settings, voice=None):
+    return hashlib.sha256(json.dumps([text,settings.tts_model,voice or settings.tts_voice,FORMAT],
                                     ensure_ascii=False).encode()).hexdigest()
 
 
@@ -21,19 +21,21 @@ async def prepare(db, provider, settings, lead_id, product_id, prices, stop, led
     call = None
     try:
         product = await run('opening_inputs', lead_id, product_id)
-        texts = [HELLO, NOTICE.format(product_name=product['name'])]
-        keys = [identity(text, settings) for text in texts]
+        profile = dict(await run('agent_profile'))
+        voice = profile['tts_voice'] or settings.tts_voice
+        texts = [HELLO, NOTICE.format(agent_name=profile['agent_name'], product_name=product['name'])]
+        keys = [identity(text, settings, voice) for text in texts]
         for key, text in zip(keys, texts):
             if stop.is_set(): raise RuntimeError('Preparation interrupted')
-            audio = await run('opening_begin', key, text, settings.tts_model, settings.tts_voice, FORMAT)
+            audio = await run('opening_begin', key, text, settings.tts_model, voice, FORMAT)
             if audio is None:
                 # Marker is durable BEFORE any external synthesis. No implicit retry on failure.
                 try:
-                    audio = await provider.speak(text)
+                    audio = await provider.speak(text, voice)
                     await run('opening_save', key, audio, ledger)
                 except Exception: raise RuntimeError('Speech preparation unavailable') from None
         if stop.is_set(): raise RuntimeError('Preparation interrupted')
-        call = await run('reserve', lead_id, product_id, (product['name'], *keys))
+        call = await run('reserve', lead_id, product_id, (product['name'], *keys), profile)
         try:
             await run('account_call', call['id'], prices)
             if stop.is_set(): raise RuntimeError('Preparation interrupted')

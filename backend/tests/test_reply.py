@@ -76,10 +76,10 @@ class ActiveReply(unittest.TestCase):
         def retrieve(product_id, vector):
             trace.append('retrieve')
             return 'Produto fictício'
-        async def answer(history, context):
+        async def answer(history, context, agent_name="Bia"):
             trace.append('answer')
             return await reply.answer(history, context)
-        async def speak(text):
+        async def speak(text, voice=None):
             trace.append('speak')
             return b'\xff' * 160
         self.provider.transcribe = transcribe

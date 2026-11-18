@@ -29,7 +29,7 @@ class Cache(unittest.TestCase):
             with self.subTest(cancel=cancel):
                 entered = threading.Event(); release = threading.Event(); closed = threading.Event()
                 spoken = []
-                async def speak(text):
+                async def speak(text, voice=None):
                     spoken.append(text); entered.set()
                     await asyncio.to_thread(release.wait, 2)
                     return b'\xff'*160
@@ -77,7 +77,7 @@ class Cache(unittest.TestCase):
         provider._openai = NS(audio=NS(speech=NS(create=speech)))
         self.client = TestClient(create_app(self.settings, self.store, provider))
         self.assertEqual(self.post('/calls', {'lead_id':1,'product_id':1}).status_code, 201)
-        expected = NOTICE.format(product_name='Produto')
+        expected = NOTICE.format(agent_name='Bia', product_name='Produto')
         self.client.patch('/products/1', json={'name':'After reservation'}, headers=self.headers)
         stream = 'MZ'+'5'*32
         self.callback('/twilio/voice/1', {'CallSid':'CA'+'1'*32,'AnsweredBy':'human'})
