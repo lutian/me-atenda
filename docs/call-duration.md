@@ -2,6 +2,12 @@
 
 O padrão para novas reservas é **180 segundos (3 minutos)**. A política fica no singleton `call_policy`, no PostgreSQL, e não em credenciais ou configurações pessoais. Atualizações não modificam chamadas já reservadas.
 
+## Configuração no Streamlit
+
+Abra **Configurações** no menu lateral. O campo **Duração máxima da ligação (segundos)** carrega o valor persistido; 180 significa3minutos. Altere e clique em **Salvar limite**. A página não salva automaticamente nem inicia chamadas ao renderizar, e mudanças só valem para novas reservas.
+
+Se a leitura falhar, o formulário não aparece com um valor padrão inventado. Se a gravação falhar, não é exibida confirmação de sucesso nem ocorre nova tentativa automática. As chaves e o endereço do backend continuam exclusivamente no servidor Streamlit.
+
 ## Configuração autenticada
 
 - `GET /settings/calls` retorna `{"max_duration_seconds":180}` inicialmente.
