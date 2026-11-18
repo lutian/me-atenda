@@ -85,7 +85,6 @@ class MemoryStore:
         if row is None: raise LookupError()
         return dict(row)
     def product(self, data, chunks, id=None):
-        if id: self.messages.pop(id, None)
         id = id or len(self.products) + 1
         self.products[id] = dict(id=id, **data)
         return self.products[id]

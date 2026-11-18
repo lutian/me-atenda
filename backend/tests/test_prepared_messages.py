@@ -85,15 +85,21 @@ class PreparedMessages(unittest.TestCase):
         self.assertEqual(spoken, [])
         self.assertEqual(self.messages(), EMPTY)
 
-    def test_voice_change_and_product_edit_invalidate_readiness(self):
+    def test_voice_change_invalidates_readiness(self):
         self.product()
         self.assertEqual(self.save({'opening': OPENING, 'pitch': PITCH, 'goodbye': GOODBYE}).status_code, 200)
-        self.assertEqual(self.client.patch('/settings/agent', json={'agent_name': 'Pedro', 'tts_voice': 'onyx'},
+        self.assertEqual(self.client.patch('/settings/agent', json={'agent_name': 'Bia', 'tts_voice': 'onyx'},
                                            headers=self.headers).status_code, 200)
         self.assertEqual(self.messages(), {'opening': OPENING, 'pitch': PITCH, 'goodbye': GOODBYE, 'ready': False})
-        self.assertEqual(self.client.patch('/products/1', json={'description': 'Nova descrição'},
-                                           headers=self.headers).status_code, 200)
-        self.assertEqual(self.messages(), EMPTY)
+
+    def test_product_edit_keeps_saved_texts_and_ready_audio(self):
+        self.product()
+        self.assertEqual(self.save({'opening': OPENING, 'pitch': PITCH, 'goodbye': GOODBYE}).status_code, 200)
+        spoken = self.spy()
+        for change in ({'description': 'Integração de cartórios'}, {'description': 'Nova descrição'}):
+            self.assertEqual(self.client.patch('/products/1', json=change, headers=self.headers).status_code, 200)
+            self.assertEqual(self.messages(), {'opening': OPENING, 'pitch': PITCH, 'goodbye': GOODBYE, 'ready': True})
+        self.assertEqual(spoken, [])  # Nothing regenerated or paid again.
 
     def test_agent_name_change_invalidates_opening_even_with_same_voice(self):
         self.product()

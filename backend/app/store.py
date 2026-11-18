@@ -74,8 +74,6 @@ class Store(AnsweringStore, OpeningStore, AccountingStore):
                                  (data['name'], data['description'], id)).fetchone()
                 if not row: raise LookupError('not found')
                 db.execute('DELETE FROM product_chunks WHERE product_id=%s', (id,))
-                # The pitch was drafted from the old product text; force a reviewed regeneration.
-                db.execute('DELETE FROM product_messages WHERE product_id=%s', (id,))
             for text, vector in chunks:
                 db.execute('INSERT INTO product_chunks(product_id,content,embedding) VALUES (%s,%s,%s::vector)',
                            (row['id'], text, self.vector(vector)))

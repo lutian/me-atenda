@@ -119,6 +119,22 @@ class DispatchUI(unittest.TestCase):
         self.assertFalse(self.app.exception)
         self.assertEqual(self.api.dispatched, [(1, 1)])
 
+    def test_previously_prepared_messages_are_preloaded_and_ready(self):
+        from streamlit.testing.v1 import AppTest
+        self.api.status = {'opening': OPENING, 'pitch': PITCH, 'goodbye': 'Até logo.', 'ready': True}
+        # A fresh session, like reopening the Leads screen later.
+        app = AppTest.from_file(str(FRONTEND / 'app.py'), default_timeout=5).run()
+        app.sidebar.radio[0].set_value('Leads').run()
+        app.selectbox(key='dispatch-lead').set_value(1)
+        app.selectbox(key='dispatch-product').set_value(1).run()
+        self.assertEqual(app.text_area(key='opening-1').value, OPENING)
+        self.assertEqual(app.text_area(key='pitch-1').value, PITCH)
+        self.assertEqual(app.text_area(key='goodbye-1').value, 'Até logo.')
+        self.assertTrue(any('Áudios prontos' in s.value for s in app.success))
+        app.checkbox[0].check().run()
+        self.assertFalse(next(b for b in app.button if b.label == 'Iniciar UMA ligação').disabled)
+        self.assertEqual(self.api.saved, [])  # Nothing regenerated.
+
     def test_saved_messages_are_loaded_and_goodbye_defaults(self):
         self.assertEqual(self.app.text_area(key='opening-1').value, '')
         self.assertEqual(self.app.text_area(key='pitch-1').value, '')

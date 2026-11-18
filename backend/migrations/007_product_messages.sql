@@ -1,4 +1,4 @@
--- Operator-confirmed scripted messages per product. Editing the product deletes them (stale pitch).
+-- Operator-confirmed scripted messages per product; they persist until the operator saves new ones.
 CREATE TABLE IF NOT EXISTS product_messages (
     product_id BIGINT PRIMARY KEY REFERENCES products(id) ON DELETE CASCADE,
     pitch TEXT NOT NULL CHECK (char_length(pitch) BETWEEN 1 AND 400),
