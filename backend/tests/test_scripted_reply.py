@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import unittest
 from starlette.websockets import WebSocketDisconnect
+from app.voice import classify_reply
 import test_api as fixtures
 
 PITCH = 'Integramos cartórios ao seu sistema. Você cuida da parte técnica?'
@@ -78,6 +79,74 @@ class ScriptedReply(unittest.TestCase):
                                               prepared=False)
         self.assertEqual(offered, [[]])
         self.assertEqual(spoken, ['Posso explicar?'])
+
+
+    def heard(self, text):
+        async def transcribe(pcm): return text
+        embeds = []
+        async def embed(texts):
+            embeds.append(texts); return [[0.0] * 1536 for _ in texts]
+        self.provider.transcribe = transcribe; self.provider.embed = embed
+        return embeds
+
+    def test_obvious_acceptance_plays_pitch_without_llm(self):
+        spoken, offered, call = None, None, None
+        self.heard('Sim, pode falar.')
+        spoken, offered, call = self.converse([])
+        self.assertEqual(offered, [])  # The LLM was never asked.
+        self.assertEqual(call['transcription_json'][-1], {'role': 'assistant', 'content': PITCH})
+        self.assertEqual(spoken, [])
+
+    def test_obvious_refusal_and_wrong_number_play_goodbye_without_llm(self):
+        for text, outcome in (('Não tenho interesse.', 'sem_interesse'), ('É engano, número errado.', 'numero_errado')):
+            with self.subTest(text=text):
+                self.setUp()
+                self.heard(text)
+                spoken, offered, call = self.converse([])
+                self.assertEqual(offered, [])
+                self.assertEqual(call['transcription_json'][-1], {'role': 'assistant', 'content': GOODBYE})
+                self.assertEqual(call['status_final'], outcome)
+                self.assertEqual(spoken, [])
+
+    def test_unclear_reply_goes_to_llm(self):
+        self.heard('Por que sim?')
+        spoken, offered, call = self.converse([{'text': 'Para apresentar o produto.', 'outcome': None, 'script': None}])
+        self.assertEqual(offered, [['pitch', 'goodbye']])
+        self.assertEqual(spoken, ['Para apresentar o produto.'])
+
+    def test_rule_applies_only_to_the_opening_question(self):
+        # After the pitch, "não" may answer anything; only the LLM can judge it.
+        answers = iter(['Pode falar.', 'Não.'])
+        async def transcribe(pcm): return next(answers)
+        self.provider.transcribe = transcribe
+        spoken, offered, call = self.converse([{'text': 'Quem cuida disso?', 'outcome': None, 'script': None}],
+                                              utterances=2)
+        self.assertEqual(offered, [['goodbye']])
+        self.assertEqual(spoken, ['Quem cuida disso?'])
+
+    def test_calls_without_prepared_messages_keep_using_llm(self):
+        self.heard('Sim, pode falar.')
+        spoken, offered, call = self.converse([{'text': 'Posso explicar?', 'outcome': None, 'script': None}],
+                                              prepared=False)
+        self.assertEqual(offered, [[]])
+
+
+class ReplyRule(unittest.TestCase):
+    def test_clear_answers(self):
+        cases = {'yes': ['Sim', 'Sim, pode falar.', 'Pode falar.', 'Pois não.', 'Claro!', 'Sou eu.',
+                         'É comigo.', 'Pode sim', 'Oi, sim. Alô.', 'Sim, podemos.', 'Tudo bem, fala.'],
+                 'no': ['Não.', 'Não tenho interesse.', 'Não, obrigado.', 'Agora não.', 'Sem interesse',
+                        'Não quero.'],
+                 'wrong': ['Número errado.', 'É engano.', 'Ligou errado.', 'Não, número errado.']}
+        for verdict, texts in cases.items():
+            for text in texts:
+                self.assertEqual(classify_reply(text), verdict, text)
+
+    def test_unclear_answers_go_to_llm(self):
+        for text in ('Por que sim?', 'Quem fala?', 'Não conheço essa empresa.', 'Não sou eu.', 'Sim, mas agora não posso.', 'Não sou eu, é o João.',
+                     'Eu.', 'Tenho interesse', 'Assim não dá pra falar', 'Fim!', '',
+                     'Sim, mas antes preciso entender melhor o que vocês fazem e quanto custa isso'):
+            self.assertIsNone(classify_reply(text), text)
 
 
 if __name__ == '__main__': unittest.main()

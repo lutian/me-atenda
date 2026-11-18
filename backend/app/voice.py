@@ -71,11 +71,48 @@ def enqueue(queue, pcm):
 FILLERS = {'alo', 'oi', 'ola', 'hello', 'hum', 'hm', 'humm', 'ah', 'eh', 'ei'}
 
 
+def words_of(text):
+    plain = unicodedata.normalize('NFKD', text or '').encode('ascii', 'ignore').decode().lower()
+    return re.findall(r'[a-z]+', plain)
+
+
 def is_filler(text):
     """True when an utterance carries no content beyond greeting/hesitation words."""
-    plain = unicodedata.normalize('NFKD', text or '').encode('ascii', 'ignore').decode().lower()
-    words = re.findall(r'[a-z]+', plain)
+    words = words_of(text)
     return bool(words) and len(words) <= 6 and all(word in FILLERS for word in words)
+
+
+# Answers to the opening question ("É com você que posso falar?"), longest phrases first.
+REPLY_PHRASES = sorted([
+    *((p, 'yes') for p in ('pois nao', 'pode falar', 'pode sim', 'pode ser', 'sou eu', 'e comigo',
+                           'com certeza', 'tudo bem', 'sim', 'pode', 'podemos', 'claro', 'fala', 'isso',
+                           'ok', 'certo', 'perfeito')),
+    *((p, 'no') for p in ('nao tenho interesse', 'sem interesse', 'nao quero', 'agora nao', 'nao posso', 'nao')),
+    *((p, 'wrong') for p in ('numero errado', 'ligou errado', 'foi engano', 'e engano', 'engano')),
+], key=lambda item: -len(item[0].split()))
+NEUTRAL = FILLERS | {'obrigado', 'obrigada', 'senhor', 'senhora', 'muito'}
+
+
+def classify_reply(text):
+    """'yes', 'no' or 'wrong' only when EVERY word is a known answer; otherwise None (ask the LLM)."""
+    words = words_of(text)
+    if '?' in (text or '') or not words or len(words) > 10: return None
+    kinds, i = set(), 0
+    while i < len(words):
+        if words[i] in NEUTRAL:
+            i += 1; continue
+        for phrase, kind in REPLY_PHRASES:
+            size = len(phrase.split())
+            if ' '.join(words[i:i + size]) == phrase:
+                kinds.add(kind); i += size
+                break
+        else: return None  # An unknown word can change the meaning.
+    if 'wrong' in kinds and 'yes' not in kinds: return 'wrong'
+    return kinds.pop() if len(kinds) == 1 else None
+
+
+# Deterministic routing of the opening answer: (prepared message, outcome).
+REPLY_ROUTES = {'yes': ('pitch', None), 'no': ('goodbye', 'sem_interesse'), 'wrong': ('goodbye', 'numero_errado')}
 
 
 def failure_reason(exc):
@@ -132,15 +169,20 @@ async def session(ws, id, store, providers):
                 if not await can_speak(): continue
                 # Kept in the transcript for audit; never answered (see FILLERS).
                 if is_filler(text): continue
-                embedding = (await providers.embed([text]))[0]
-                context = await db('retrieve', bound['product_id'], embedding)
-                current = await db('get', 'calls', id)
-                if not current['active'] or not await can_speak(): continue
                 offered = [k for k in ('pitch', 'goodbye') if prepared[k] and not (k == 'pitch' and pitched)]
-                history = [turn for turn in current['transcription_json']
-                           if not (turn['role'] == 'user' and is_filler(turn['content']))]
-                result = await providers.answer(history, context,
-                                                bound.get('agent_name') or 'Bia', offered)
+                # Clear answers to the opening question skip embedding and LLM latency.
+                route = REPLY_ROUTES.get(classify_reply(text)) if 'pitch' in offered else None
+                if route and route[0] in offered:
+                    result = {'text': '', 'script': route[0], 'outcome': route[1]}
+                else:
+                    embedding = (await providers.embed([text]))[0]
+                    context = await db('retrieve', bound['product_id'], embedding)
+                    current = await db('get', 'calls', id)
+                    if not current['active'] or not await can_speak(): continue
+                    history = [turn for turn in current['transcription_json']
+                               if not (turn['role'] == 'user' and is_filler(turn['content']))]
+                    result = await providers.answer(history, context,
+                                                    bound.get('agent_name') or 'Bia', offered)
                 if not await can_speak(): continue
                 script = result.get('script')
                 if script in offered:

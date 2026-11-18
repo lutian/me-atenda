@@ -54,3 +54,13 @@ Um script não oferecido é ignorado, e aí a resposta precisa trazer texto pró
 ## "Alô" no meio da conversa
 
 Quando o lead fala só cumprimentos ou hesitações enquanto espera (alô, oi, olá, hello, hum, ah, eh, ei; até 6 palavras, sem diferenciar acentos ou maiúsculas), a fala fica na transcrição para auditoria, mas não recebe resposta e não vai para o LLM. Assim, cada "Alô?" dito durante uma espera não vira um turno novo respondido fora de hora. Uma frase com conteúdo, como "Oi, sim. Alô.", é respondida normalmente.
+
+## Resposta à abertura sem LLM
+
+A resposta a "É com você que posso falar?" passa primeiro por uma regra determinística (`classify_reply`), aplicada só enquanto a apresentação preparada ainda não tocou:
+
+- **sim**: "sim", "pode falar", "pois não", "claro", "sou eu", "é comigo", "tudo bem"… toca a apresentação;
+- **não**: "não", "não tenho interesse", "sem interesse", "agora não", "não quero"… toca a despedida com `sem_interesse`;
+- **contato errado**: "número errado", "engano", "ligou errado"… toca a despedida com `numero_errado`.
+
+A regra só decide quando **todas** as palavras da fala são reconhecidas; cumprimentos e "obrigado" são ignorados. Uma pergunta, uma palavra desconhecida, sinais misturados ("sim, mas agora não posso") ou mais de 10 palavras vão para o LLM, como antes. Nesse caminho não há embedding nem chamada ao LLM, então a espera é só a da transcrição.
