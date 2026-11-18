@@ -21,3 +21,4 @@ htmlcov/
 models/
 data/
 backups/
+.worktrees/
